@@ -1,7 +1,7 @@
-ï»¿#pragma comment(lib, "ws2_32.lib")
-#define _CRT_SECURE_NO_WARNINGS // í˜¹ì€ localtime_së¥¼ ì‚¬ìš©
+#pragma comment(lib, "ws2_32.lib")
+#define _CRT_SECURE_NO_WARNINGS // È¤Àº localtime_s¸¦ »ç¿ë
 
-#include <WinSock2.h> //Winsock í—¤ë”íŒŒì¼ include. WSADATA ë“¤ì–´ìˆìŒ.
+#include <WinSock2.h> //Winsock Çì´õÆÄÀÏ include. WSADATA µé¾îÀÖÀ½.
 #include <WS2tcpip.h>
 #include <string>
 #include <sstream>
@@ -23,9 +23,12 @@ sql::Statement* stmt;
 sql::PreparedStatement* pstmt;
 sql::ResultSet* result;
 
-const string server = "tcp://127.0.0.1:3306"; // ë°ì´í„°ë² ì´ìŠ¤ ì£¼ì†Œ
-const string username = "root"; // ë°ì´í„°ë² ì´ìŠ¤ ì‚¬ìš©ì
-const string password = "1234"; // ë°ì´í„°ë² ì´ìŠ¤ ì ‘ì† ë¹„ë°€ë²ˆí˜¸
+const string server = "tcp://127.0.0.1:3306"; // µ¥ÀÌÅÍº£ÀÌ½º ÁÖ¼Ò
+const string username = "root"; // µ¥ÀÌÅÍº£ÀÌ½º »ç¿ëÀÚ
+const string db_password = "1234"; // µ¥ÀÌÅÍº£ÀÌ½º Á¢¼Ó ºñ¹Ğ¹øÈ£
+
+const int special_word = 3;
+const string new_password;
 
 SOCKET client_sock;
 string real_nickname;
@@ -33,7 +36,9 @@ string real_nickname;
 time_t timer;
 struct tm* t;
 
-void go_chatting(SOCKADDR_IN& client_addr);
+int chat_recv();
+void modify_user_info(string*, string*);
+bool user_delete(string*, string*);
 
 namespace my_to_str
 {
@@ -44,167 +49,96 @@ namespace my_to_str
         return stm.str();
     }
 }
+enum Modify {
+    MODIFY_ID,
+    MODIFY_PASSWORD,
+    MODIFY_NICKNAME,
+    MODIFY_EMAIL,
+};
+enum Delete {
+    _DELETE,
+    YES_DELETE,
+    NO_DELETE,
+};
 
-void make_room() {
 
+//void make_room() {
+//    string title;
+//    string date = check_date();
+//    cout << "Ã¤ÆÃ¹æ Á¦¸ñÀ» ¼³Á¤ÇØÁÖ¼¼¿ä. >> ";
+//    getline(cin, title);
+//
+//    pstmt = con->prepareStatement("insert into chatting_room(room_id, room_title, date) values(?,?,?)");
+//    pstmt->setString(1, title);
+//   
+//    pstmt->setString(2, date);
+//    pstmt->execute();
+//    cout << "Ã¤ÆÃ¹æÀÌ °³¼³µÇ¾ú½À´Ï´Ù." << endl;
+//
+//}
+bool email_check(string email) {
+    if (email.find("@") == string::npos) {
+        return false;
+    }
+    else if (email.find(".com") == string::npos) {
+        return false;
+    }
+    else if (email.find(".com") < email.find("@")) {
+        return false;
+    }
+    else
+        return true;
 }
 
-
 string check_date() {
-    timer = time(NULL); // 1970ë…„ 1ì›” 1ì¼ 0ì‹œ 0ë¶„ 0ì´ˆë¶€í„° ì‹œì‘í•˜ì—¬ í˜„ì¬ê¹Œì§€ì˜ ì´ˆ
-    t = localtime(&timer); // í¬ë§·íŒ…ì„ ìœ„í•´ êµ¬ì¡°ì²´ì— ë„£ê¸°
+    timer = time(NULL); // 1970³â 1¿ù 1ÀÏ 0½Ã 0ºĞ 0ÃÊºÎÅÍ ½ÃÀÛÇÏ¿© ÇöÀç±îÁöÀÇ ÃÊ
+    t = localtime(&timer); // Æ÷¸ËÆÃÀ» À§ÇØ ±¸Á¶Ã¼¿¡ ³Ö±â
     string to_date;
-
+   
     to_date = my_to_str::to_string(t->tm_year + 1900) + "-" + my_to_str::to_string(t->tm_mon + 1) + "-"
         + my_to_str::to_string(t->tm_mday);
+
     return to_date;
 }
 
 string check_timestamp() {
-    timer = time(NULL); // 1970ë…„ 1ì›” 1ì¼ 0ì‹œ 0ë¶„ 0ì´ˆë¶€í„° ì‹œì‘í•˜ì—¬ í˜„ì¬ê¹Œì§€ì˜ ì´ˆ
-    t = localtime(&timer); // í¬ë§·íŒ…ì„ ìœ„í•´ êµ¬ì¡°ì²´ì— ë„£ê¸°
+    timer = time(NULL); // 1970³â 1¿ù 1ÀÏ 0½Ã 0ºĞ 0ÃÊºÎÅÍ ½ÃÀÛÇÏ¿© ÇöÀç±îÁöÀÇ ÃÊ
+    t = localtime(&timer); // Æ÷¸ËÆÃÀ» À§ÇØ ±¸Á¶Ã¼¿¡ ³Ö±â
     string to_timestamp;
 
     to_timestamp = my_to_str::to_string(t->tm_year + 1900) + "-" + my_to_str::to_string(t->tm_mon + 1) + "-"
         + my_to_str::to_string(t->tm_mday) + "-" + my_to_str::to_string(t->tm_hour)
         + "-" + my_to_str::to_string(t->tm_min) + "-" + my_to_str::to_string(t->tm_sec);
+
     return to_timestamp;
 }
-
-
-int chat_recv() {
-    char buf[MAX_SIZE] = { };
-    string msg;
-
-    while (1) {
-        ZeroMemory(&buf, MAX_SIZE);
-        if (recv(client_sock, buf, MAX_SIZE, 0) > 0) {
-            msg = buf;
-            std::stringstream ss(msg);  // ë¬¸ìì—´ì„ ìŠ¤íŠ¸ë¦¼í™”
-            string user;
-            ss >> user; // ìŠ¤íŠ¸ë¦¼ì„ í†µí•´, ë¬¸ìì—´ì„ ê³µë°± ë¶„ë¦¬í•´ ë³€ìˆ˜ì— í• ë‹¹. ë³´ë‚¸ ì‚¬ëŒì˜ ì´ë¦„ë§Œ userì— ì €ì¥ë¨.
-            if (user != real_nickname) cout << buf << endl; // ë‚´ê°€ ë³´ë‚¸ ê²Œ ì•„ë‹ ê²½ìš°ì—ë§Œ ì¶œë ¥í•˜ë„ë¡.
-        }
-        else {
-            cout << "Server Off" << endl;
-            return -1;
-        }
-    }
-}
-
-void join_membership() {
-    string id, password, nickname, email;
-    string correct_id, correct_password;
-
-    while (1) {
-        cout << "ì‚¬ìš©í•  ì•„ì´ë””ë¥¼ ì…ë ¥í•´ì£¼ì„¸ìš”. >> ";
-        cin >> id;
-
-        pstmt = con->prepareStatement("SELECT * FROM user where user_id=? ;"); //ìœ ì € idì˜ ì¤‘ë³µ ì²´í¬ë¥¼ ìœ„í•œ selectë¬¸
-        pstmt->setString(1, id);
-
-        pstmt->execute();
-
-        result = pstmt->executeQuery();
-        while (result->next()) {
-            correct_id = result->getString(1).c_str();
-        }
-        if (correct_id == id) {
-            cout << "ì´ë¯¸ ì‚¬ìš©ì¤‘ì¸ ì•„ì´ë””ì…ë‹ˆë‹¤." << endl;
-        }
-        else if (correct_id != id) {
-            cout << "ì‚¬ìš©í•  ë¹„ë°€ë²ˆí˜¸ë¥¼ ì…ë ¥í•´ì£¼ì„¸ìš” >> ";
-            cin >> password;
-            cout << "ë‹‰ë„¤ì„ì„ ì…ë ¥í•´ì£¼ì„¸ìš” >> ";
-            cin >> nickname;
-            cout << "ì´ë©”ì¼ì„ ì…ë ¥í•´ì£¼ì„¸ìš” >> ";
-            cin >> email;
-            break;
-        }
-    }
-    //ì•„ì´ë”” ì¤‘ë³µ ì²´í¬ê°€ ëë‚˜ë©´ ë¹„ë°€ë²ˆí˜¸ ì´ë¦„ì„ userí…Œì´ë¸”ì— ì €ì¥í•œë‹¤.
-    pstmt = con->prepareStatement("insert into user(user_id, password, nickname, email) values(?,?,?,?)");
-    pstmt->setString(1, id);
-    pstmt->setString(2, password);
-    pstmt->setString(3, nickname);
-    pstmt->setString(4, email);
-    pstmt->execute();
-    cout << "íšŒì›ê°€ì…ì´ ì™„ë£Œë˜ì—ˆìŠµë‹ˆë‹¤." << endl;
-
-}
-//void message_store(string check_id) {
-//
-//    string store_id, store_msg; //clientí…Œì´ë¸”ì—ì„œ idë‘,chattingë‚´ìš©ì„ ë‹´ì„ ë³€ìˆ˜ 
-//
-//    bool id = true;
-//    cout << "ì €ì¥ëœ ë‚´ìš©" << endl;
-//    con->setSchema("login");
-//    pstmt = con->prepareStatement("SELECT * FROM chatting_massenger;");
-//    result = pstmt->executeQuery();
-//    while (result->next()) {
-//        store_id = result->getString("id").c_str();
-//        store_msg = result->getString("text").c_str();
-//        //ì²˜ìŒ ì…ì¥í•´ì„œ ì±„íŒ…ë‚´ìš©ì´ ì—†ìœ¼ë©´ ì „ ë‚´ìš©ì„ ëª»ë³´ê²Œ ì„¤ì •
-//        if (store_id == check_id)
-//        {
-//            id = false;
-//        }
-//        if (id == false)
-//        {
-//            cout << store_id << " : " << store_msg << endl;
-//        }
-//    }
-//}
-
-// 2023_10_11 ì—…ë°ì´íŠ¸ (ë¡œê·¸ì¸ ê°€ëŠ¥ì—¬ë¶€)
+// 2023_10_11 ¾÷µ¥ÀÌÆ® (·Î±×ÀÎ °¡´É¿©ºÎ)
 bool login_possible(string id, string password) {
-   
+
     string check_id, check_pw;
-    
+
     pstmt = con->prepareStatement("SELECT * FROM user where user_id=? and password=?;");
     pstmt->setString(1, id);
     pstmt->setString(2, password);
     pstmt->execute();
-    result = pstmt->executeQuery(); //ë°ì´í„°ë² ì´ìŠ¤ì—ì„œ id ì™€ password ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
+    result = pstmt->executeQuery(); //µ¥ÀÌÅÍº£ÀÌ½º¿¡¼­ id ¿Í password ¸¦ °¡Á®¿Â´Ù.
     while (result->next()) {
         check_id = result->getString(1).c_str();
         check_pw = result->getString(2).c_str();
         real_nickname = result->getString(3).c_str();
     }
     if (check_id == id && check_pw == password) {
-        cout << "ë¡œê·¸ì¸ ë˜ì—ˆìŠµë‹ˆë‹¤." << endl;
+        cout << "·Î±×ÀÎ µÇ¾ú½À´Ï´Ù." << endl;
         return true;
     }
     else {
-        cout << "ë¡œê·¸ì¸ì— ì‹¤íŒ¨í–ˆìŠµë‹ˆë‹¤." << endl;
+        cout << "·Î±×ÀÎ¿¡ ½ÇÆĞÇß½À´Ï´Ù." << endl;
         return false;
     }
 }
-
-
-// 2023_10_11 ì—…ë°ì´íŠ¸ (ë¡œê·¸ì¸ ì„±ê³µì‹œ ë©”ë‰´)
-void MenuList(SOCKADDR_IN& client_addr, string id, string password) {
-    int num;
-    cout << "1. íšŒì›ì •ë³´ìˆ˜ì • 2. ì±„íŒ…ë°© ì…ì¥ 3. íšŒì›íƒˆí‡´\n";
-    cin >> num;
-    while (true) {
-        switch (num) {
-        case 1:
-            //modify_user_info(id, password);
-            break;
-        case 2:
-            go_chatting(client_addr);
-            break;
-        case 3:
-            //user_delete(id, password);
-            break;
-        }
-    }
-}
-
-// 2023_10_11 ì—…ë°ì´íŠ¸ (ë©”ë‰´ë¦¬ìŠ¤íŠ¸ - ì±„íŒ…ë°© ì…ì¥ í•¨ìˆ˜)
-void go_chatting(SOCKADDR_IN &client_addr) {        //ì±—íŒ…ë°© ì…ì¥ í•¨ìˆ˜
-    //ë¡œê·¸ì¸í›„ ì„œë²„ì™€ ì»¤ë„¥íŠ¸ í•œë‹¤.
+// 2023_10_11 ¾÷µ¥ÀÌÆ® (¸Ş´º¸®½ºÆ® - Ã¤ÆÃ¹æ ÀÔÀå ÇÔ¼ö)
+void go_chatting(SOCKADDR_IN& client_addr) {        //ÃªÆÃ¹æ ÀÔÀå ÇÔ¼ö
+    //·Î±×ÀÎÈÄ ¼­¹ö¿Í Ä¿³ØÆ® ÇÑ´Ù.
     while (1) {
         if (!connect(client_sock, (SOCKADDR*)&client_addr, sizeof(client_addr))) {
             cout << "Server Connect" << endl;
@@ -219,66 +153,302 @@ void go_chatting(SOCKADDR_IN &client_addr) {        //ì±—íŒ…ë°© ì…ì¥ í•¨ìˆ˜
     while (1) {
         string text;
         std::getline(cin, text);
-        const char* buffer = text.c_str(); // stringí˜•ì„ char* íƒ€ì…ìœ¼ë¡œ ë³€í™˜
+
+        const char* buffer = text.c_str(); // stringÇüÀ» char* Å¸ÀÔÀ¸·Î º¯È¯
+        
+        //pstmt = con->createStatement();
+        pstmt= con->prepareStatement("insert into chatting(message_content, send_time, user_nickname) values(?, ?, ?)");
+        pstmt->setString(1, text);
+        pstmt->setString(2, check_timestamp());
+        pstmt->setString(3, real_nickname);
+        
+        pstmt->execute();
+
         send(client_sock, buffer, strlen(buffer), 0);
     }
     th2.join();
     closesocket(client_sock);
 }
 
+// 2023_10_11 ¾÷µ¥ÀÌÆ® (·Î±×ÀÎ ¼º°ø½Ã ¸Ş´º)
+void MenuList(SOCKADDR_IN& client_addr, string* id, string* password) {
+    int num;
+    
+    cout << "1. È¸¿øÁ¤º¸¼öÁ¤ 2. Ã¤ÆÃ¹æ ÀÔÀå 3. È¸¿øÅ»Åğ\n";
+    cin >> num;
+    while (true) {
+        switch (num) {
+        case 1:
+            modify_user_info(id, password);
+            MenuList(client_addr, id, password); // È¸¿øÁ¤º¸¼öÁ¤ÀÌ ¿Ï·áµÈ ÈÄ µÚ·Î°¡±â ´À³¦??
+            break;
+        case 2:
+            go_chatting(client_addr);
+            break;
+        case 3:
+            if (user_delete(id, password)) {
+                //¸ŞÀÎÈ­¸éÀ¸·Î
+            }
+            else {
+                MenuList(client_addr, id, password);
+            }
+            break;
+        }
+    }
+}
+void modify_user_info(string* id, string* password) {
+    string check_id, check_password;
+    string new_info;
+    int what_modify = 0;
+
+    pstmt = con->prepareStatement("SELECT * FROM user where user_id = ? and password = ?");
+    pstmt->setString(1, *id);
+    pstmt->setString(2, *password);
+    pstmt->execute();
+    result = pstmt->executeQuery();
+
+    while (result->next()) {
+        check_id = result->getString(1).c_str();
+        check_password = result->getString(2).c_str();
+    }//¿Ö id¶û password °ª ºñ±³ÇÏ´Â°ÅÁö? ¹®Á¦ -> ¿©±ä ³Ñ¾î°£´Ù°í ÃÄµµ 
+    //È¸¿øÁ¤º¸ ºñ¹Ğ¹øÈ£ ¼öÁ¤ÇÏ°í È¸¿øÅ»ÅğÇÏ·Á¸é call by value¶ó¼­ ¿À·ù.
+    if (check_id == *id && check_password == *password) {
+        cout << "1.ºñ¹Ğ¹øÈ£  2.´Ğ³×ÀÓ  3.ÀÌ¸ŞÀÏ" << endl;
+        cout << "¼öÁ¤À» ¿øÇÏ½Ã´Â Ç×¸ñÀ» ¼±ÅÃÇØÁÖ¼¼¿ä. >> ";
+        cin >> what_modify;
+
+        switch (what_modify) {
+        case MODIFY_PASSWORD:
+            cout << "»õ·Î¿î ºñ¹Ğ¹øÈ£¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+            cin >> new_info;
+            pstmt = con->prepareStatement("UPDATE user set password = ? where user_id = ?");
+            pstmt->setString(1, new_info);
+            pstmt->setString(2, *id);
+            pstmt->execute();
+            *password = new_info;
+            //delete pstmt;
+            //delete result;
+            cout << "¼º°øÀûÀ¸·Î Á¤º¸°¡ ¼öÁ¤µÇ¾ú½À´Ï´Ù." << endl;
+            break;
+        case MODIFY_NICKNAME:
+            cout << "»õ·Î¿î ´Ğ³×ÀÓÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+            cin >> new_info;
+            pstmt = con->prepareStatement("UPDATE user set nickname = ? where user_id = ?");
+            pstmt->setString(1, new_info);
+            pstmt->setString(2, *id);
+            pstmt->execute();
+            cout << "¼º°øÀûÀ¸·Î Á¤º¸°¡ ¼öÁ¤µÇ¾ú½À´Ï´Ù." << endl;
+            break;
+        case MODIFY_EMAIL:
+            cout << "»õ·Î¿î ÀÌ¸ŞÀÏÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+            cin >> new_info;
+            pstmt = con->prepareStatement("UPDATE user set email = ? where user_id = ?");
+            pstmt->setString(1, new_info);
+            pstmt->setString(2, *id);
+            pstmt->execute();
+            cout << "¼º°øÀûÀ¸·Î Á¤º¸°¡ ¼öÁ¤µÇ¾ú½À´Ï´Ù." << endl;
+            break;
+        }
+    }
+    else {
+        cout << "¾ÆÀÌµğ ¶Ç´Â ºñ¹Ğ¹øÈ£°¡ ¿Ã¹Ù¸£Áö ¾Ê½À´Ï´Ù." << endl;
+    }
+}
+
+bool user_delete(string* id, string* password) {
+    int yes_or_no = 0;
+    string delete_password;
+    cout << "È¸¿øÅ»Åğ¸¦ ÇÒ °æ¿ì ¸ğµç ´ëÈ­ ³»¿ëÀÌ »ç¶óÁı´Ï´Ù." << endl
+        << "°è¼Ó ÁøÇàÇÏ½Ã°Ú½À´Ï±î? (1. ¿¹  2. ¾Æ´Ï¿À) >> ";
+    cin >> yes_or_no;
+    switch (yes_or_no) {
+    case YES_DELETE:
+        cout << "¾ÈÀüÇÑ È¸¿øÅ»Åğ¸¦ À§ÇØ, ºñ¹Ğ¹øÈ£¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+        cin >> delete_password;
+        if (delete_password == *password) {
+            pstmt = con->prepareStatement("DELETE FROM user where password = ?");
+            pstmt->setString(1, *password);
+            pstmt->execute();
+            cout << "¼º°øÀûÀ¸·Î È¸¿øÅ»Åğ°¡ µÇ¾ú½À´Ï´Ù." << endl;
+            return true;
+        }
+        else {
+            cout << "¿Ã¹Ù¸£Áö ¾ÊÀº ºñ¹Ğ¹øÈ£¸¦ ÀÔ·ÂÇÏ¼Ì½À´Ï´Ù." << endl;
+            return false;
+        }
+        break;
+    case NO_DELETE:
+        return false;
+        break;
+    }
+}
+
+
+
+int chat_recv() {
+    char buf[MAX_SIZE] = { };
+    string msg;
+
+    while (1) {
+        ZeroMemory(&buf, MAX_SIZE);
+        if (recv(client_sock, buf, MAX_SIZE, 0) > 0) {
+            msg = buf;
+            std::stringstream ss(msg);  // ¹®ÀÚ¿­À» ½ºÆ®¸²È­
+            string user;
+            ss >> user; // ½ºÆ®¸²À» ÅëÇØ, ¹®ÀÚ¿­À» °ø¹é ºĞ¸®ÇØ º¯¼ö¿¡ ÇÒ´ç. º¸³½ »ç¶÷ÀÇ ÀÌ¸§¸¸ user¿¡ ÀúÀåµÊ.
+            if (user != real_nickname) cout << buf << endl; // ³»°¡ º¸³½ °Ô ¾Æ´Ò °æ¿ì¿¡¸¸ Ãâ·ÂÇÏµµ·Ï.
+        }
+        else {
+            cout << "Server Off" << endl;
+            return -1;
+        }
+    }
+}
+bool password_check(string a) {
+    char special_char[special_word] = { '!', '?', '#' };
+    for (char c : special_char) {
+        if (a.find(c) != string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+void join_membership() {
+    string id, password, nickname, email;
+    string correct_id, correct_password;
+
+    while (1) {
+        cout << "»ç¿ëÇÒ ¾ÆÀÌµğ¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+        cin >> id;
+
+        pstmt = con->prepareStatement("SELECT * FROM user where user_id=? ;"); //À¯Àú idÀÇ Áßº¹ Ã¼Å©¸¦ À§ÇÑ select¹®
+        pstmt->setString(1, id);
+        
+        pstmt->execute();
+
+        result = pstmt->executeQuery();
+        while (result->next()) {
+            correct_id = result->getString(1).c_str();
+        }
+        if (correct_id == id) {
+            cout << "ÀÌ¹Ì »ç¿ëÁßÀÎ ¾ÆÀÌµğÀÔ´Ï´Ù." << endl;
+        }
+        else if (correct_id != id) {
+            while (1) {
+                cout << "»ç¿ëÇÒ ºñ¹Ğ¹øÈ£¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä. (!, ?, # Áß 1°³ ÀÌ»ó Æ÷ÇÔ) >> ";
+                cin >> password;
+                if (password_check(password)) {
+                    break;
+                }
+                continue;
+            }
+            cout << "´Ğ³×ÀÓÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä >> ";
+            cin >> nickname;
+            cout << "ÀÌ¸ŞÀÏÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+            while (1) {
+                cin >> email;
+                if (email_check(email)) {
+                    break;
+                }
+                else {
+                    cout << "ÀÌ¸ŞÀÏ Çü½Ä¿¡ ¸ÂÃç¼­ ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+                    continue;
+                }
+            }
+            break;
+        }
+    }
+    //¾ÆÀÌµğ Áßº¹ Ã¼Å©°¡ ³¡³ª¸é ºñ¹Ğ¹øÈ£ ÀÌ¸§À» userÅ×ÀÌºí¿¡ ÀúÀåÇÑ´Ù.
+    pstmt = con->prepareStatement("insert into user(user_id, password, nickname, email) values(?,?,?,?)");
+    pstmt->setString(1, id);
+    pstmt->setString(2, password);
+    pstmt->setString(3, nickname);
+    pstmt->setString(4, email);
+    pstmt->execute();
+    cout << "È¸¿ø°¡ÀÔÀÌ ¿Ï·áµÇ¾ú½À´Ï´Ù." << endl;
+        
+    }
+//void message_store(string check_id) {
+//
+//    string store_id, store_msg; //clientÅ×ÀÌºí¿¡¼­ id¶û,chatting³»¿ëÀ» ´ãÀ» º¯¼ö 
+//
+//    bool id = true;
+//    cout << "ÀúÀåµÈ ³»¿ë" << endl;
+//    con->setSchema("login");
+//    pstmt = con->prepareStatement("SELECT * FROM chatting_massenger;");
+//    result = pstmt->executeQuery();
+//    while (result->next()) {
+//        store_id = result->getString("id").c_str();
+//        store_msg = result->getString("text").c_str();
+//        //Ã³À½ ÀÔÀåÇØ¼­ Ã¤ÆÃ³»¿ëÀÌ ¾øÀ¸¸é Àü ³»¿ëÀ» ¸øº¸°Ô ¼³Á¤
+//        if (store_id == check_id)
+//        {
+//            id = false;
+//        }
+//        if (id == false)
+//        {
+//            cout << store_id << " : " << store_msg << endl;
+//        }
+//    }
+//}
+
+
 int main() {
     WSADATA wsa;
     int client_choose = 0;
     bool login = true;
-    // Winsockë¥¼ ì´ˆê¸°í™”í•˜ëŠ” í•¨ìˆ˜. MAKEWORD(2, 2)ëŠ” Winsockì˜ 2.2 ë²„ì „ì„ ì‚¬ìš©í•˜ê² ë‹¤ëŠ” ì˜ë¯¸.
-     // ì‹¤í–‰ì— ì„±ê³µí•˜ë©´ 0ì„, ì‹¤íŒ¨í•˜ë©´ ê·¸ ì´ì™¸ì˜ ê°’ì„ ë°˜í™˜.
-     // 0ì„ ë°˜í™˜í–ˆë‹¤ëŠ” ê²ƒì€ Winsockì„ ì‚¬ìš©í•  ì¤€ë¹„ê°€ ë˜ì—ˆë‹¤ëŠ” ì˜ë¯¸.
+    string id, password;
+    // Winsock¸¦ ÃÊ±âÈ­ÇÏ´Â ÇÔ¼ö. MAKEWORD(2, 2)´Â WinsockÀÇ 2.2 ¹öÀüÀ» »ç¿ëÇÏ°Ú´Ù´Â ÀÇ¹Ì.
+     // ½ÇÇà¿¡ ¼º°øÇÏ¸é 0À», ½ÇÆĞÇÏ¸é ±× ÀÌ¿ÜÀÇ °ªÀ» ¹İÈ¯.
+     // 0À» ¹İÈ¯Çß´Ù´Â °ÍÀº WinsockÀ» »ç¿ëÇÒ ÁØºñ°¡ µÇ¾ú´Ù´Â ÀÇ¹Ì.
     int code = WSAStartup(MAKEWORD(2, 2), &wsa);
 
     try {
         driver = sql::mysql::get_mysql_driver_instance();
-        con = driver->connect(server, username, password);
+        con = driver->connect(server, username, db_password);
     }
     catch (sql::SQLException& e) {
         cout << "Could not connect to server. Error message: " << e.what() << endl;
         exit(1);
     }
     con->setSchema("chat");
-    //í•œêµ­ì–´ë¥¼ ë°›ê¸°ìœ„í•œ ì„¤ì •ë¬¸
+    //ÇÑ±¹¾î¸¦ ¹Ş±âÀ§ÇÑ ¼³Á¤¹®
     stmt = con->createStatement();
     stmt->execute("set names euckr");
     if (stmt) { delete stmt; stmt = nullptr; }
     stmt = con->createStatement();
     delete stmt;
-    
+
     if (!code) {
 
         client_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP); // 
 
-        // ì—°ê²°í•  ì„œë²„ ì •ë³´ ì„¤ì • ë¶€ë¶„
+        // ¿¬°áÇÒ ¼­¹ö Á¤º¸ ¼³Á¤ ºÎºĞ
         SOCKADDR_IN client_addr = {};
         client_addr.sin_family = AF_INET;
         client_addr.sin_port = htons(7777);
         InetPton(AF_INET, TEXT("127.0.0.1"), &client_addr.sin_addr);
-        string id, password;
+
         while (1) {
-            cout << "1: ë¡œê·¸ì¸í•˜ê¸° 2: íšŒì›ê°€ì…í•˜ê¸°" << endl;
+            cout << "1: ·Î±×ÀÎÇÏ±â 2: È¸¿ø°¡ÀÔÇÏ±â" << endl;
             cin >> client_choose;
-            // ë¡œê·¸ì¸
+            // ·Î±×ÀÎ
             if (client_choose == 1) {
+                //string id, password;
                 cout << "ID:";
                 cin >> id;
                 cout << "PW:";
                 cin >> password;
                 bool check = login_possible(id, password);
                 if (!check) continue;
-                MenuList(client_addr, id, password);
+                MenuList(client_addr, &id, &password);
             }
             if (client_choose == 2)
             {
                 join_membership();
                 continue;
             }
+            
         }
     }
     WSACleanup();
