@@ -5,6 +5,8 @@
 #include <iostream>
 #include <thread>
 #include <vector>
+#include <mysql/jdbc.h>
+#include <sstream>
 
 #define MAX_SIZE 1024
 #define MAX_CLIENT 3
@@ -13,6 +15,17 @@ using std::cout;
 using std::cin;
 using std::endl;
 using std::string;
+
+sql::mysql::MySQL_Driver* driver;
+sql::Connection* con;
+sql::Statement* stmt;
+sql::PreparedStatement* pstmt;
+sql::ResultSet* result;
+
+const string server = "tcp://127.0.0.1:3306"; // 데이터베이스 주소
+const string username = "root"; // 데이터베이스 사용자
+const string db_password = "1234"; // 데이터베이스 접속 비밀번호
+
 
 struct SOCKET_INFO { // 연결된 소켓 정보에 대한 틀 생성
     SOCKET sck;
@@ -28,6 +41,7 @@ void add_client(); // 소켓에 연결을 시도하는 client를 추가(accept)�
 void send_msg(const char* msg); // send() 함수 실행됨. 자세한 내용은 함수 구현부에서 확인.
 void recv_msg(int idx); // recv() 함수 실행됨. 자세한 내용은 함수 구현부에서 확인.
 void del_client(int idx); // 소켓에 연결되어 있는 client를 제거하는 함수. closesocket() 실행됨. 자세한 내용은 함수 구현부에서 확인.
+void direct_msg(string nickname, string msg);
 
 int main() {
     WSADATA wsa;
@@ -36,6 +50,16 @@ int main() {
     // 실행에 성공하면 0을, 실패하면 그 이외의 값을 반환.
     // 0을 반환했다는 것은 Winsock을 사용할 준비가 되었다는 의미.
     int code = WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    try {
+        driver = sql::mysql::get_mysql_driver_instance();
+        con = driver->connect(server, username, db_password);
+    }
+    catch (sql::SQLException& e) {
+        cout << "Could not connect to server. Error message: " << e.what() << endl;
+        exit(1);
+    }
+    con->setSchema("chat");
 
     if (!code) {
         server_init();
@@ -131,6 +155,56 @@ void send_msg(const char* msg) {
     }
 }
 
+void direct_msg(string nickname, string msg) { //다이렉트 메세지
+    std::stringstream stream;
+    stream.str(msg);
+    string sub, send_msg;
+    while (stream >> sub) {
+        if (sub != "/dm") {
+            break;
+        }
+    }
+    pstmt = con->prepareStatement("select * from user");
+    pstmt->execute();
+    result = pstmt->executeQuery();
+    
+    int loc = msg.find(sub) + sub.length(), flag;
+
+    while (result->next()) {
+        flag = 0;
+        if (result->getString(1).compare(sub)) { //만약 dm 보낼 사람의 아이디가 DB에 저장된것과 같다면
+            send_msg = "귓속말 [" + nickname + "] " + ":" + msg.substr(loc);
+            for (int i = 0; i < client_count; i++) {    //소켓 리스트에서 찾는다.
+                if (sck_list[i].user == sub) {
+                    send(sck_list[i].sck, send_msg.c_str(), MAX_SIZE, 0);
+                    flag = 1; break;
+                }
+            }
+
+            if (flag == 0) {
+                send_msg = "현재 " + sub + "는 들어와있지 않습니다. \n";
+                for (int i = 0; i < client_count; i++) {    //소켓 리스트에서 찾는다.
+                    if (sck_list[i].user == nickname) {
+                        send(sck_list[i].sck, send_msg.c_str(), MAX_SIZE, 0);
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+        else {
+            send_msg="채팅 사용자가 아닙니다.\n";
+            for (int i = 0; i < client_count; i++) {    //소켓 리스트에서 찾는다.
+                if (sck_list[i].user == nickname) {
+                    send(sck_list[i].sck, send_msg.c_str(), MAX_SIZE, 0);
+                    break;
+                }
+            }
+        }
+    }
+
+}
+
 void recv_msg(int idx) {
     char buf[MAX_SIZE] = { };
     string msg = "";
@@ -140,7 +214,13 @@ void recv_msg(int idx) {
     while (1) {
         ZeroMemory(&buf, MAX_SIZE);
         if (recv(sck_list[idx].sck, buf, MAX_SIZE, 0) > 0) { // 오류가 발생하지 않으면 recv는 수신된 바이트 수를 반환. 0보다 크다는 것은 메시지가 왔다는 것.
+            
+            if (string(buf).substr(0, 4) == "/dm ") {
+                direct_msg(sck_list[idx].user, buf);
+                continue;
+            }
             msg = sck_list[idx].user + " : " + buf;
+            
             cout << msg << endl;
             send_msg(msg.c_str());
         }
