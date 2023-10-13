@@ -32,13 +32,15 @@ const string new_password;
 
 SOCKET client_sock;
 string real_nickname;
-
+int delete_return = 0;
 time_t timer;
 struct tm* t;
 
+bool password_check(string a);
 int chat_recv();
 void modify_user_info(string*, string*);
 bool user_delete(string*, string*);
+void chat_history();
 
 namespace my_to_str
 {
@@ -84,6 +86,9 @@ bool email_check(string email) {
         return false;
     }
     else if (email.find(".com") < email.find("@")) {
+        return false;
+    }
+    else if (email.find("@") == 0) {
         return false;
     }
     else
@@ -136,9 +141,20 @@ bool login_possible(string id, string password) {
         return false;
     }
 }
+
+void chat_history() {
+    pstmt = con->prepareStatement("select * from chatting"); //db 에서 값을 불러온다.
+    pstmt->execute();
+    result = pstmt->executeQuery();
+
+    while (result->next()) {
+        cout << result->getString(2) << " [" + result->getString(3) + "] :" << result->getString(1) << '\n';
+    }
+}
+
 // 2023_10_11 업데이트 (메뉴리스트 - 채팅방 입장 함수)
 void go_chatting(SOCKADDR_IN& client_addr) {        //챗팅방 입장 함수
-    //로그인후 서버와 커넥트 한다.
+    //서버와 커넥트 한다.
     while (1) {
         if (!connect(client_sock, (SOCKADDR*)&client_addr, sizeof(client_addr))) {
             cout << "Server Connect" << endl;
@@ -157,6 +173,7 @@ void go_chatting(SOCKADDR_IN& client_addr) {        //챗팅방 입장 함수
         const char* buffer = text.c_str(); // string형을 char* 타입으로 변환
         
         //pstmt = con->createStatement();
+        if (text == "") continue;
         pstmt= con->prepareStatement("insert into chatting(message_content, send_time, user_nickname) values(?, ?, ?)");
         pstmt->setString(1, text);
         pstmt->setString(2, check_timestamp());
@@ -172,11 +189,11 @@ void go_chatting(SOCKADDR_IN& client_addr) {        //챗팅방 입장 함수
 
 // 2023_10_11 업데이트 (로그인 성공시 메뉴)
 void MenuList(SOCKADDR_IN& client_addr, string* id, string* password) {
-    int num;
+    int num=0;
     
-    cout << "1. 회원정보수정 2. 채팅방 입장 3. 회원탈퇴\n";
+    cout << "1. 회원정보수정 2. 채팅방 입장 3. 회원탈퇴 4. 메인화면\n";
     cin >> num;
-    while (true) {
+    
         switch (num) {
         case 1:
             modify_user_info(id, password);
@@ -186,15 +203,18 @@ void MenuList(SOCKADDR_IN& client_addr, string* id, string* password) {
             go_chatting(client_addr);
             break;
         case 3:
-            if (user_delete(id, password)) {
-                //메인화면으로
+            user_delete(id, password);
+            if (delete_return) {
+                break;
             }
             else {
                 MenuList(client_addr, id, password);
+                break;
             }
+        case 4:
             break;
         }
-    }
+    
 }
 void modify_user_info(string* id, string* password) {
     string check_id, check_password;
@@ -283,8 +303,6 @@ bool user_delete(string* id, string* password) {
     }
 }
 
-
-
 int chat_recv() {
     char buf[MAX_SIZE] = { };
     string msg;
@@ -293,10 +311,15 @@ int chat_recv() {
         ZeroMemory(&buf, MAX_SIZE);
         if (recv(client_sock, buf, MAX_SIZE, 0) > 0) {
             msg = buf;
+            if (msg == "1") {
+                chat_history(); continue;
+            }
+
             std::stringstream ss(msg);  // 문자열을 스트림화
             string user;
             ss >> user; // 스트림을 통해, 문자열을 공백 분리해 변수에 할당. 보낸 사람의 이름만 user에 저장됨.
             if (user != real_nickname) cout << buf << endl; // 내가 보낸 게 아닐 경우에만 출력하도록.
+            
         }
         else {
             cout << "Server Off" << endl;
@@ -304,6 +327,7 @@ int chat_recv() {
         }
     }
 }
+
 bool password_check(string a) {
     char special_char[special_word] = { '!', '?', '#' };
     for (char c : special_char) {
@@ -313,6 +337,7 @@ bool password_check(string a) {
     }
     return false;
 }
+
 void join_membership() {
     string id, password, nickname, email;
     string correct_id, correct_password;
@@ -421,7 +446,7 @@ int main() {
 
     if (!code) {
 
-        client_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP); // 
+        client_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);  
 
         // 연결할 서버 정보 설정 부분
         SOCKADDR_IN client_addr = {};
@@ -442,6 +467,7 @@ int main() {
                 bool check = login_possible(id, password);
                 if (!check) continue;
                 MenuList(client_addr, &id, &password);
+                continue;
             }
             if (client_choose == 2)
             {

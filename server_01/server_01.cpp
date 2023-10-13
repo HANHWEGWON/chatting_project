@@ -43,6 +43,7 @@ void recv_msg(int idx); // recv() 함수 실행됨. 자세한 내용은 함수 �
 void del_client(int idx); // 소켓에 연결되어 있는 client를 제거하는 함수. closesocket() 실행됨. 자세한 내용은 함수 구현부에서 확인.
 void direct_msg(string nickname, string msg);
 
+
 int main() {
     WSADATA wsa;
 
@@ -141,13 +142,16 @@ void add_client() {
     string msg = "[공지] " + new_client.user + " 님이 입장했습니다.";
     cout << msg << endl;
     sck_list.push_back(new_client); // client 정보를 답는 sck_list 배열에 새로운 client 추가
-
+    
     std::thread th(recv_msg, client_count);
     // 다른 사람들로부터 오는 메시지를 계속해서 받을 수 있는 상태로 만들어 두기.
 
     client_count++; // client 수 증가.
     cout << "[공지] 현재 접속자 수 : " << client_count << "명" << endl;
     send_msg(msg.c_str()); // c_str : string 타입을 const chqr* 타입으로 바꿔줌.
+
+    string first = "1";
+    send(new_client.sck, first.c_str(), first.size(), 0);
 
     th.join();
 }
@@ -215,6 +219,7 @@ void recv_msg(int idx) {
     char buf[MAX_SIZE] = { };
     string msg = "";
 
+    
     //cout << sck_list[idx].user << endl;
 
     while (1) {
