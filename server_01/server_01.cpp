@@ -60,6 +60,9 @@ int main() {
         exit(1);
     }
     con->setSchema("chat");
+    stmt = con->createStatement();
+    stmt->execute("set names euckr");
+    if (stmt) { delete stmt; stmt = nullptr; }
 
     if (!code) {
         server_init();
@@ -159,29 +162,31 @@ void direct_msg(string nickname, string msg) { //다이렉트 메세지
     std::stringstream stream;
     stream.str(msg);
     string sub, send_msg;
-    while (stream >> sub) {
+    while (stream >> sub) { //sub 는 상대방 이름.
         if (sub != "/dm") {
             break;
         }
     }
-    pstmt = con->prepareStatement("select * from user");
+    pstmt = con->prepareStatement("select * from user"); //db 에서 값을 불러온다.
     pstmt->execute();
     result = pstmt->executeQuery();
     
-    int loc = msg.find(sub) + sub.length(), flag;
+    int loc = msg.find(sub) + sub.length();
+    int db_flag = 0, cur_flag = 0;
 
     while (result->next()) {
-        flag = 0;
-        if (result->getString(1).compare(sub)) { //만약 dm 보낼 사람의 아이디가 DB에 저장된것과 같다면
+        if (result->getString(3).compare(sub)==0) { //만약 dm 보낼 사람의 아이디가 DB에 저장된것과 같다면
+            db_flag = 1;
             send_msg = "귓속말 [" + nickname + "] " + ":" + msg.substr(loc);
-            for (int i = 0; i < client_count; i++) {    //소켓 리스트에서 찾는다.
+            for (int i = 0; i < client_count; i++) {    //소켓 리스트에서 찾는다. 현재 들어와 있는지.
                 if (sck_list[i].user == sub) {
                     send(sck_list[i].sck, send_msg.c_str(), MAX_SIZE, 0);
-                    flag = 1; break;
+                    cur_flag = 1; break;
                 }
             }
+            
 
-            if (flag == 0) {
+            if (cur_flag == 0) {
                 send_msg = "현재 " + sub + "는 들어와있지 않습니다. \n";
                 for (int i = 0; i < client_count; i++) {    //소켓 리스트에서 찾는다.
                     if (sck_list[i].user == nickname) {
@@ -192,13 +197,14 @@ void direct_msg(string nickname, string msg) { //다이렉트 메세지
             }
             break;
         }
-        else {
-            send_msg="채팅 사용자가 아닙니다.\n";
-            for (int i = 0; i < client_count; i++) {    //소켓 리스트에서 찾는다.
-                if (sck_list[i].user == nickname) {
-                    send(sck_list[i].sck, send_msg.c_str(), MAX_SIZE, 0);
-                    break;
-                }
+    }
+
+    if (db_flag == 0) {
+        send_msg = "채팅 가입자가 아닙니다.\n";
+        for (int i = 0; i < client_count; i++) {    //소켓 리스트에서 찾는다.
+            if (sck_list[i].user == nickname) {
+                send(sck_list[i].sck, send_msg.c_str(), MAX_SIZE, 0);
+                break;
             }
         }
     }
