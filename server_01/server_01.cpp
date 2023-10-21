@@ -7,9 +7,9 @@
 #include <vector>
 #include <mysql/jdbc.h>
 #include <sstream>
-
+#include<vector>
 #define MAX_SIZE 1024
-#define MAX_CLIENT 3
+#define MAX_CLIENT 1
 
 using std::cout;
 using std::cin;
@@ -31,7 +31,7 @@ struct SOCKET_INFO { // 연결된 소켓 정보에 대한 틀 생성
     SOCKET sck;
     string user;
 };
-
+std::vector<SOCKET_INFO> ready;
 std::vector<SOCKET_INFO> sck_list; // 연결된 클라이언트 소켓들을 저장할 배열 선언.
 SOCKET_INFO server_sock; // 서버 소켓에 대한 정보를 저장할 변수 선언.
 int client_count = 0; // 현재 접속해 있는 클라이언트를 count 할 변수 선언.
@@ -79,6 +79,7 @@ int main() {
             string text, msg = "";
 
             std::getline(cin, text);
+            
             const char* buf = text.c_str();
             msg = server_sock.user + " : " + buf;
             send_msg(msg.c_str());
@@ -126,34 +127,39 @@ void server_init() {
 }
 
 void add_client() {
-    SOCKADDR_IN addr = {};
-    int addrsize = sizeof(addr);
-    char buf[MAX_SIZE] = { };
+    while (true) {
+        SOCKADDR_IN addr = {};
+        int addrsize = sizeof(addr);
+        char buf[MAX_SIZE] = { };
 
-    ZeroMemory(&addr, addrsize); // addr의 메모리 영역을 0으로 초기화
+        ZeroMemory(&addr, addrsize); // addr의 메모리 영역을 0으로 초기화
 
-    SOCKET_INFO new_client = {};
+        SOCKET_INFO new_client = {};
 
-    new_client.sck = accept(server_sock.sck, (sockaddr*)&addr, &addrsize);
-    recv(new_client.sck, buf, MAX_SIZE, 0);
-    // Winsock2의 recv 함수. client가 보낸 닉네임을 받음.
-    new_client.user = string(buf);
+        new_client.sck = accept(server_sock.sck, (sockaddr*)&addr, &addrsize);
+        if (new_client.sck == -1) continue; //에러시 -1을 반환 계속해서 받아드릴 준비를 위한 반복문으로 continue;
 
-    string msg = "[공지] " + new_client.user + " 님이 입장했습니다.";
-    cout << msg << endl;
-    sck_list.push_back(new_client); // client 정보를 답는 sck_list 배열에 새로운 client 추가
+        recv(new_client.sck, buf, MAX_SIZE, 0);
+        // Winsock2의 recv 함수. client가 보낸 닉네임을 받음.
+        new_client.user = string(buf);
+
+        string msg = "[공지] " + new_client.user + " 님이 입장했습니다.";
+        cout << msg << endl;
+        sck_list.push_back(new_client); // client 정보를 답는 sck_list 배열에 새로운 client 추가
+
+        std::thread th(recv_msg, client_count);
+        // 다른 사람들로부터 오는 메시지를 계속해서 받을 수 있는 상태로 만들어 두기.
+
+        client_count++; // client 수 증가.
+        cout << "[공지] 현재 접속자 수 : " << client_count << "명" << endl;
+        send_msg(msg.c_str()); // c_str : string 타입을 const chqr* 타입으로 바꿔줌.
+
+        string first = "1";
+        send(new_client.sck, first.c_str(), first.size(), 0);
+
+        th.join();
+    }
     
-    std::thread th(recv_msg, client_count);
-    // 다른 사람들로부터 오는 메시지를 계속해서 받을 수 있는 상태로 만들어 두기.
-
-    client_count++; // client 수 증가.
-    cout << "[공지] 현재 접속자 수 : " << client_count << "명" << endl;
-    send_msg(msg.c_str()); // c_str : string 타입을 const chqr* 타입으로 바꿔줌.
-
-    string first = "1";
-    send(new_client.sck, first.c_str(), first.size(), 0);
-
-    th.join();
 }
 
 void send_msg(const char* msg) {
@@ -171,6 +177,19 @@ void direct_msg(string nickname, string msg) { //다이렉트 메세지
             break;
         }
     }
+
+    if (nickname == sub) {
+        send_msg = "자기자신에게는 dm을 보낼수 없습니다.\n";
+        for (int i = 0; i < client_count; i++) {    //소켓 리스트에서 찾는다.
+            if (sck_list[i].user == nickname) {
+                send(sck_list[i].sck, send_msg.c_str(), MAX_SIZE, 0);
+                break;
+            }
+        }
+        return;
+
+    }
+
     pstmt = con->prepareStatement("select * from user"); //db 에서 값을 불러온다.
     pstmt->execute();
     result = pstmt->executeQuery();
@@ -183,7 +202,7 @@ void direct_msg(string nickname, string msg) { //다이렉트 메세지
             db_flag = 1;
             send_msg = "귓속말 [" + nickname + "] " + ":" + msg.substr(loc);
             for (int i = 0; i < client_count; i++) {    //소켓 리스트에서 찾는다. 현재 들어와 있는지.
-                if (sck_list[i].user == sub) {
+                if (sck_list[i].user == sub) {  //dm 보낼닉네임 메세지내용.
                     send(sck_list[i].sck, send_msg.c_str(), MAX_SIZE, 0);
                     cur_flag = 1; break;
                 }
@@ -204,7 +223,7 @@ void direct_msg(string nickname, string msg) { //다이렉트 메세지
     }
 
     if (db_flag == 0) {
-        send_msg = "채팅 가입자가 아닙니다.\n";
+        send_msg = "채팅프로그램 가입자가 아닙니다.\n";
         for (int i = 0; i < client_count; i++) {    //소켓 리스트에서 찾는다.
             if (sck_list[i].user == nickname) {
                 send(sck_list[i].sck, send_msg.c_str(), MAX_SIZE, 0);
@@ -215,7 +234,7 @@ void direct_msg(string nickname, string msg) { //다이렉트 메세지
 
 }
 
-void recv_msg(int idx) {
+void recv_msg(int idx) { 
     char buf[MAX_SIZE] = { };
     string msg = "";
 
@@ -230,6 +249,16 @@ void recv_msg(int idx) {
                 direct_msg(sck_list[idx].user, buf);
                 continue;
             }
+            else if (string(buf).substr(0, 5) == "/back") { //back 함수!
+                msg = "[공지] " + sck_list[idx].user + " 님이 퇴장했습니다.";
+                        
+                cout << msg << endl;
+                send_msg(msg.c_str());
+                del_client(idx); // 클라이언트 삭제
+                cout << "[공지] 현재 접속자 수 : " << client_count << "명" << endl;
+                return;
+            }
+
             msg = sck_list[idx].user + " : " + buf;
             
             cout << msg << endl;
@@ -243,10 +272,44 @@ void recv_msg(int idx) {
             return;
         }
     }
+    
 }
 
 void del_client(int idx) {
-    closesocket(sck_list[idx].sck);
-    //sck_list.erase(sck_list.begin() + idx); // 배열에서 클라이언트를 삭제하게 될 경우 index가 달라지면서 런타임 오류 발생....ㅎ
+    
+    int code = ::shutdown(sck_list[idx].sck, SD_BOTH);
+    if (code != SOCKET_ERROR)
+
+    {
+        fd_set readfds;
+
+        fd_set errorfds;
+
+        timeval timeout;
+
+
+
+        FD_ZERO(&readfds);
+
+        FD_ZERO(&errorfds);
+
+        FD_SET(sck_list[idx].sck, &readfds);
+
+        FD_SET(sck_list[idx].sck, &errorfds);
+
+
+
+        timeout.tv_sec = 0.1;
+
+        timeout.tv_usec = 0;
+
+        ::select(1, &readfds, NULL, &errorfds, &timeout);
+
+    }
+
+    code = ::closesocket(sck_list[idx].sck);
+
+    sck_list[idx].sck = INVALID_SOCKET;
+    sck_list.erase(sck_list.begin() + idx); // 배열에서 클라이언트를 삭제하게 될 경우 index가 달라지면서 런타임 오류 발생....ㅎ
     client_count--;
 }
