@@ -9,6 +9,7 @@
 #include <thread>
 #include <mysql/jdbc.h>
 #include <ctime>
+#include <conio.h>
 
 #define MAX_SIZE 1024
 
@@ -17,6 +18,7 @@ using std::cin;
 using std::endl;
 using std::string;
 
+WSADATA wsa;
 sql::mysql::MySQL_Driver* driver;
 sql::Connection* con;
 sql::Statement* stmt;
@@ -29,18 +31,22 @@ const string db_password = "1234"; // 데이터베이스 접속 비밀번호
 
 const int special_word = 3;
 const string new_password;
-
+SOCKADDR_IN client_addr = { };
 SOCKET client_sock;
 string real_nickname;
 int delete_return = 0;
 time_t timer;
 struct tm* t;
+int turn_flag=0; // 게임 턴을 확인하기 위한 플래그변수
 
 bool password_check(string a);
-int chat_recv();
+int chat_recv(string*, string*);
 void modify_user_info(string*, string*);
 bool user_delete(string*, string*);
 void chat_history();
+void MenuList(string*, string*);
+void create_client();
+void gameRoomFunction(string);
 
 namespace my_to_str
 {
@@ -122,11 +128,17 @@ bool login_possible(string id, string password) {
 
     string check_id, check_pw;
 
-    pstmt = con->prepareStatement("SELECT * FROM user where user_id=? and password=?;");
-    pstmt->setString(1, id);
-    pstmt->setString(2, password);
-    pstmt->execute();
-    result = pstmt->executeQuery(); //데이터베이스에서 id 와 password 를 가져온다.
+    try {
+        pstmt = con->prepareStatement("SELECT * FROM user where user_id=? and password=?;");
+        pstmt->setString(1, id);
+        pstmt->setString(2, password);
+        result = pstmt->executeQuery(); //데이터베이스에서 id 와 password 를 가져온다.
+    }
+    catch (sql::SQLException& e) {
+        cout << "#\t SQL Exception: " << e.what();
+        cout << " (MySQL error code: " << e.getErrorCode();
+        cout << ", SQLState: " << e.getSQLState() << " )" << endl;
+    }
     while (result->next()) {
         check_id = result->getString(1).c_str();
         check_pw = result->getString(2).c_str();
@@ -136,9 +148,12 @@ bool login_possible(string id, string password) {
         cout << "로그인 되었습니다." << endl;
         return true;
     }
-    else {
-        cout << "로그인에 실패했습니다." << endl;
+    else if(check_id == id && check_pw != password){
+        cout << "비밀번호가 맞지않습니다. 다시 입력해주세요." << endl;
         return false;
+    }
+    else {
+        cout << "로그인 실패!\n"; return false;
     }
 }
 
@@ -152,55 +167,168 @@ void chat_history() {
     }
 }
 
+//void gameRoomFunction() { //게임에서 클라이언트가 메세지를 보내야하는 기능
+//    
+//    string text;
+//    cin.ignore();
+//    
+//    std::getline(cin, text);
+//
+//    const char* buffer = text.c_str();
+//
+//    send(client_sock, buffer, strlen(buffer), 0);
+//
+//    char buf[MAX_SIZE] = { };
+//    string msg;
+//
+//    
+//    ZeroMemory(&buf, MAX_SIZE);
+//    if (recv(client_sock, buf, MAX_SIZE, 0) > 0) {
+//            msg = buf;
+//
+//
+//        if (msg.compare("상대턴입니다! 기다려주세요.") == 0) {
+//            turn_flag = 0;
+//        }
+//        else if (msg.compare("My Turn!!\n") == 0) {
+//            turn_flag = 1;
+//        }
+//
+//
+//        std::stringstream ss(msg);  // 문자열을 스트림화
+//
+//
+//        string user;
+//        ss >> user; // 스트림을 통해, 문자열을 공백 분리해 변수에 할당. 보낸 사람의 이름만 user에 저장됨.
+//        if (user == real_nickname) return;
+//        ss >> user;
+//        if (msg.compare("[공지] " + user + " 님이 입장했습니다.") == 0) return;
+//        cout << buf << endl;
+//
+//
+//    }
+//    else {
+//        cout << "Server Off" << endl;
+//        return;
+//    }
+//    
+//}
+
 // 2023_10_11 업데이트 (메뉴리스트 - 채팅방 입장 함수)
-void go_chatting(SOCKADDR_IN& client_addr) {        //챗팅방 입장 함수
+void go_chatting(string *id, string *password, int port_num) {        //챗팅방 입장 함수
     //서버와 커넥트 한다.
+    
+    client_addr.sin_port=htons(port_num);
+
     while (1) {
         if (!connect(client_sock, (SOCKADDR*)&client_addr, sizeof(client_addr))) {
-            cout << "Server Connect" << endl;
+            if(port_num == 7777) cout << "Server Connect" << endl;
+            if (port_num == 6666) cout << "gameServer Connect" << endl; 
             send(client_sock, real_nickname.c_str(), real_nickname.length(), 0);
             break;
         }
         cout << "Connecting..." << endl;
     }
 
-    std::thread th2(chat_recv);
-    //message_store(check_id);
-    while (1) {
-        string text;
-        std::getline(cin, text);
 
-        const char* buffer = text.c_str(); // string형을 char* 타입으로 변환
+    if (port_num == 6666) {
+        cout << "게임서버에 들어왔다.." << endl;
+        char buf[MAX_SIZE] = { };
+        string msg = "", text="";
+        while (1) {
+            ZeroMemory(&buf, MAX_SIZE);
+            if (recv(client_sock, buf, MAX_SIZE, 0) > 0) {
+                msg = buf;
+                cout << "msg" << msg << endl;
+                cout << "test" << msg.find("1~9 사이의 숫자 3개를 입력 하세요.") << endl;
+                
+                if (msg.find("1~9 사이의 숫자 3개를 입력 하세요.") != string::npos) {
+                    std::getline(cin, text);
+                    cout << "text" << text << endl;
+                    send(client_sock, text.c_str(), text.size(), 0);
+                    continue;
+                }
+                else if (msg.find("******** 축하합니다") != string::npos) {
+                    
+                    text = "end_game";
+                    send(client_sock, text.c_str(), text.size(), 0);
+                    Sleep(1000);
+                    cout << "새로운 소켓 생성하고 메뉴로 가기!" << endl;
+                    create_client();
+                    MenuList(id, password);
+                    return;
+                }
+
+                
+            }
+            
+        }
         
-        //pstmt = con->createStatement();
+    }
+    
+    
+    std::thread th2(chat_recv, id, password);  // 쓰레드로서 꾸준히 데이터를 받는다.
+    
+
+    while (1) {     //클라이언트 별 메세지 보내는 라인.
+
+        
+
+        string text; 
+        std::getline(cin, text);
+        
+        const char* buffer = text.c_str(); // string형을 char* 타입으로 변환
         if (text == "") continue;
-        pstmt= con->prepareStatement("insert into chatting(message_content, send_time, user_nickname) values(?, ?, ?)");
+        
+        
+
+        
+        if (text.substr(0, 3) == "/dm") {
+            send(client_sock, buffer, strlen(buffer), 0); continue;
+        }   //dm은 데이터베이스 저장 x
+
+        if (text == "/back") {
+            send(client_sock, buffer, strlen(buffer), 0); //서버에서 소켓 닫기위한 send()
+            create_client();
+            MenuList(id, password);
+            break;
+        }
+
+        pstmt = con->prepareStatement("insert into chatting(message_content, send_time, user_nickname) values(?, ?, ?)");
         pstmt->setString(1, text);
         pstmt->setString(2, check_timestamp());
         pstmt->setString(3, real_nickname);
-        
+
         pstmt->execute();
 
         send(client_sock, buffer, strlen(buffer), 0);
     }
+
+    
     th2.join();
     closesocket(client_sock);
+    
+         
 }
 
+
 // 2023_10_11 업데이트 (로그인 성공시 메뉴)
-void MenuList(SOCKADDR_IN& client_addr, string* id, string* password) {
-    int num=0;
+void MenuList(string* id, string* password) {
+    int num = 0;
     
-    cout << "1. 회원정보수정 2. 채팅방 입장 3. 회원탈퇴 4. 메인화면\n";
+    cout << "1. 회원정보수정 2. 채팅방 입장 3. 회원탈퇴 4. 메인화면 5. 게임방 입장\n"; //게임 메뉴 추가
+    cin.clear();
     cin >> num;
+    string temp;
+    getline(cin, temp);
     
         switch (num) {
         case 1:
             modify_user_info(id, password);
-            MenuList(client_addr, id, password); // 회원정보수정이 완료된 후 뒤로가기 느낌??
+            MenuList(id, password); // 회원정보수정이 완료된 후 뒤로가기 느낌??
             break;
         case 2:
-            go_chatting(client_addr);
+            go_chatting(id, password, 7777);
             break;
         case 3:
             user_delete(id, password);
@@ -208,14 +336,19 @@ void MenuList(SOCKADDR_IN& client_addr, string* id, string* password) {
                 break;
             }
             else {
-                MenuList(client_addr, id, password);
+                MenuList(id, password);
                 break;
             }
         case 4:
             break;
+        case 5:
+            go_chatting(id, password, 6666);
+            break;
         }
     
 }
+
+
 void modify_user_info(string* id, string* password) {
     string check_id, check_password;
     string new_info;
@@ -258,6 +391,7 @@ void modify_user_info(string* id, string* password) {
             pstmt->setString(2, *id);
             pstmt->execute();
             cout << "성공적으로 정보가 수정되었습니다." << endl;
+            real_nickname = new_info;
             break;
         case MODIFY_EMAIL:
             cout << "새로운 이메일을 입력해주세요. >> ";
@@ -303,7 +437,7 @@ bool user_delete(string* id, string* password) {
     }
 }
 
-int chat_recv() {
+int chat_recv(string *id, string *password) {  //서버로부터 온 데이터를 쓰레드에서 recv로 받아오는 함수야
     char buf[MAX_SIZE] = { };
     string msg;
 
@@ -311,19 +445,26 @@ int chat_recv() {
         ZeroMemory(&buf, MAX_SIZE);
         if (recv(client_sock, buf, MAX_SIZE, 0) > 0) {
             msg = buf;
+            
             if (msg == "1") {
                 chat_history(); continue;
             }
-
+            
             std::stringstream ss(msg);  // 문자열을 스트림화
+
+            
             string user;
             ss >> user; // 스트림을 통해, 문자열을 공백 분리해 변수에 할당. 보낸 사람의 이름만 user에 저장됨.
-            if (user != real_nickname) cout << buf << endl; // 내가 보낸 게 아닐 경우에만 출력하도록.
+            if (user == real_nickname) continue;
+            ss >> user;
+            if (msg.compare("[공지] " + user + " 님이 입장했습니다.") == 0) continue;
+            cout << buf << endl;
+            
             
         }
         else {
             cout << "Server Off" << endl;
-            return -1;
+            return -1; //thread 를 끝내기 위해 return 을 한다.
         }
     }
 }
@@ -417,16 +558,32 @@ void join_membership() {
 //    }
 //}
 
+//-----------------------------------------소켓 만들기------------
+
+
+void create_client() {
+    closesocket(client_sock);
+    WSACleanup();
+    int code = WSAStartup(MAKEWORD(2, 2), &wsa);
+    if (!code) {
+        client_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+        client_addr.sin_family = AF_INET;
+        //client_addr.sin_port = htons(7777);
+        InetPton(AF_INET, TEXT("127.0.0.1"), &client_addr.sin_addr);
+    }
+}
+
 
 int main() {
-    WSADATA wsa;
-    int client_choose = 0;
-    bool login = true;
-    string id, password;
+    
     // Winsock를 초기화하는 함수. MAKEWORD(2, 2)는 Winsock의 2.2 버전을 사용하겠다는 의미.
      // 실행에 성공하면 0을, 실패하면 그 이외의 값을 반환.
      // 0을 반환했다는 것은 Winsock을 사용할 준비가 되었다는 의미.
-    int code = WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    int client_choose = 0;
+    bool login = true;
+    string id, password;
+    create_client();
 
     try {
         driver = sql::mysql::get_mysql_driver_instance();
@@ -443,40 +600,31 @@ int main() {
     if (stmt) { delete stmt; stmt = nullptr; }
     stmt = con->createStatement();
     delete stmt;
+    
+    while (1) {
+        cout << "1: 로그인하기 2: 회원가입하기" << endl;
 
-    if (!code) {
-
-        client_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);  
-
-        // 연결할 서버 정보 설정 부분
-        SOCKADDR_IN client_addr = {};
-        client_addr.sin_family = AF_INET;
-        client_addr.sin_port = htons(7777);
-        InetPton(AF_INET, TEXT("127.0.0.1"), &client_addr.sin_addr);
-
-        while (1) {
-            cout << "1: 로그인하기 2: 회원가입하기" << endl;
-            cin >> client_choose;
-            // 로그인
-            if (client_choose == 1) {
-                //string id, password;
-                cout << "ID:";
-                cin >> id;
-                cout << "PW:";
-                cin >> password;
-                bool check = login_possible(id, password);
-                if (!check) continue;
-                MenuList(client_addr, &id, &password);
-                continue;
-            }
-            if (client_choose == 2)
-            {
-                join_membership();
-                continue;
-            }
-            
+        cin >> client_choose;
+        // 로그인
+        if (client_choose == 1) {
+            //string id, password;
+            cout << "ID:";
+            cin >> id;
+            cout << "PW:";
+            cin >> password;
+            bool check = login_possible(id, password);
+            if (!check) continue;
+            MenuList(&id, &password);
+            continue;
         }
+        if (client_choose == 2)
+        {
+            join_membership();
+            continue;
+        }
+
     }
+    
     WSACleanup();
     return 0;
 }
