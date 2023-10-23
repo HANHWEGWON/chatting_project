@@ -139,6 +139,7 @@ void add_client() {
                     Sleep(1000);
                     ZeroMemory(buf, MAX_SIZE);
                     if (recv(new_client.sck, buf, MAX_SIZE, 0) > 0) {
+                        game_end = 0;
                         system("cls");
                         del_client(1);
                         del_client(0);
@@ -155,6 +156,7 @@ void add_client() {
                     Sleep(1000);
                     ZeroMemory(buf, MAX_SIZE);
                     if (recv(new_client.sck, buf, MAX_SIZE, 0) > 0) {
+                        game_end = 0;
                         system("cls");
                         del_client(1);
                         del_client(0);
