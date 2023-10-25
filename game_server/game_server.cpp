@@ -12,7 +12,7 @@
 #include<algorithm>
 
 #define MAX_SIZE 1024
-#define MAX_CLIENT 1
+#define MAX_CLIENT 2
 
 using std::cout;
 using std::cin;
@@ -40,7 +40,7 @@ int client_count = 0; // 현재 접속해 있는 클라이언트를 count 할 �
 std::vector<int> c; //랜덤숫자 저장 벡터
 int memo[10];
 std::vector<int> p; //플레이어가 언급한 숫자
-int game_end=0;
+int game_end = 0;
 
 void server_init();
 void add_client();
@@ -70,7 +70,7 @@ void baseball_init() {
         c.erase(unique(c.begin(), c.end()), c.end());
         if (c.size() == 3) break;
     }
-   
+
     cout << c[0] << ' ' << c[1] << ' ' << c[2] << '\n';
 }
 
@@ -96,25 +96,52 @@ void server_init() {
     cout << "game Server On" << endl;
 }
 
+void baseball_ranking(string state, string user) {
+
+    string sql = "";
+    if (state.compare("update")==0) {
+        pstmt = con->prepareStatement("update win_lose set win = win+1 where user_id = (select user_id from user where nickname = ?)");
+        pstmt->setString(1, user);
+        pstmt->execute();
+        pstmt = con->prepareStatement("update win_lose set lose = lose+1 where user_id = (select user_id from user where nickname = ?)");
+        pstmt->setString(1, user);
+        pstmt->execute();
+    }
+    else if (state.compare("show")==0) {
+        sql += "select nickname, win, lose from user join win_lose on user.user_id = win_lose.user_id order by win desc limit 3;";
+        stmt = con->createStatement();
+        result = stmt->executeQuery(sql);
+        cout << "\t\t\t@@@@@@@@@@@@@@@@@@@@!야구게임 랭킹!@@@@@@@@@@@@@@@@@@@@\n";
+        int cnt = 0;
+        while (result->next()) {
+            cout << "\t\t\t\t\t*" << ++cnt << "등*:" << result->getString(1) << " 승:" << result->getString(2) << " 패:" << result->getString(3) << '\n';
+        }
+        cout << "\t\t\t@@@@@@@@@@@@@@@@@@@@!야구게임 랭킹!@@@@@@@@@@@@@@@@@@@@\n";
+    }
+    
+}
+
 void add_client() {
     while (true) {
         SOCKADDR_IN addr = {};
         int addrsize = sizeof(addr);
         char buf[MAX_SIZE] = { };
+        string msg;
 
         ZeroMemory(&addr, addrsize); // addr의 메모리 영역을 0으로 초기화
 
         SOCKET_INFO new_client = {};
 
         new_client.sck = accept(server_sock.sck, (sockaddr*)&addr, &addrsize);
-        if (new_client.sck == -1) continue;
-
+        if (new_client.sck == -1) {
+            closesocket(new_client.sck);
+            continue;
+        }
         recv(new_client.sck, buf, MAX_SIZE, 0);
         // Winsock2의 recv 함수. client가 보낸 닉네임을 받음.
         new_client.user = string(buf);
-        cout << "소켓연결이 확인되고 닉네임을 받고 난후..." << endl;
 
-        string msg = "[공지] " + new_client.user + " 님이 입장했습니다.";
+        msg = "[공지] " + new_client.user + " 님이 입장했습니다.";
         cout << msg << endl;
         sck_list.push_back(new_client); // client 정보를 답는 sck_list 배열에 새로운 client 추가
 
@@ -125,9 +152,11 @@ void add_client() {
         send_msg(msg.c_str()); // c_str : string 타입을 const chqr* 타입으로 바꿔줌.
 
         if (client_count == 2) {
+            system("cls");
             msg = "[공지] 야구게임을 시작하겠습니다!";
             cout << msg << endl;
             send_msg(msg.c_str());
+            Sleep(1000);
             baseball_init();
 
             while (true) {
@@ -136,12 +165,19 @@ void add_client() {
                 Sleep(1000);
                 game_manager(0);
                 if (game_end == 1) {
-                    msg = "******** 축하합니다 [" + sck_list[0].user + "] 님이 승리하셨습니다!";
+                    msg = "******** 축하합니다 [" + sck_list[0].user + "] 님이 승리하셨습니다! *********";
                     send_msg(msg.c_str());
-                    Sleep(1000);
+                    
+                    baseball_ranking("update", sck_list[0].user);
+                    
+                    Sleep(3000);
                     ZeroMemory(buf, MAX_SIZE);
                     if (recv(new_client.sck, buf, MAX_SIZE, 0) > 0) {
+                        game_end = 0;
                         system("cls");
+                        
+                        baseball_ranking("show", "");
+                        
                         del_client(1);
                         del_client(0);
                         break;
@@ -152,12 +188,19 @@ void add_client() {
                 Sleep(1000);
                 game_manager(1);
                 if (game_end == 1) {
-                    msg = "******** 축하합니다 [" + sck_list[1].user + "] 님이 승리하셨습니다!";
+                    msg = "******** 축하합니다 [" + sck_list[1].user + "] 님이 승리하셨습니다! ********";
                     send_msg(msg.c_str());
-                    Sleep(1000);
+                    
+                    baseball_ranking("update", sck_list[1].user);
+                   
+                    Sleep(3000);
                     ZeroMemory(buf, MAX_SIZE);
                     if (recv(new_client.sck, buf, MAX_SIZE, 0) > 0) {
+                        game_end = 0;
                         system("cls");
+                        
+                        baseball_ranking("show", "");
+                        
                         del_client(1);
                         del_client(0);
                         break;
@@ -166,9 +209,9 @@ void add_client() {
             }
         }
     }
-    
 
-    
+
+
     //th.join();
 }
 
@@ -182,26 +225,28 @@ bool is_digit(string str) {
     return atoi(str.c_str()) != 0 || str.compare("0") == 0;
 }
 
-bool checkThreeNumber(string &msg, int* memo) {
-    
+bool checkThreeNumber(string& msg, int* memo) {
+
     std::stringstream stream(msg);
     string sub;
 
     while (stream >> sub) {
-        
+
         int x = atoi(sub.c_str());
-        
+
         if (!is_digit(sub)) {
             msg = "숫자가 아닌것이 들어와있습니다. 다시 입력해주세요.***";
             return false;
-        }else if(x < 1 || x > 9) {
+        }
+        else if (x < 1 || x > 9) {
             msg = "범위를 넘어선 숫자가 있습니다. 다시 입력해주세요.***";
             return false;
-        }else if (memo[x] == 1) {
+        }
+        else if (memo[x] == 1) {
             msg = "숫자가 중복되어있습니다. 다시 입력해주세요.***";
             return false;
         }
-        
+
         p.push_back(x);
         memo[x] = 1;
     }
@@ -211,18 +256,18 @@ bool checkThreeNumber(string &msg, int* memo) {
 void game_manager(int turn) { // 쓰레드로 클라이언트에서 오는 데이터 받아오는 함수
     char buf[MAX_SIZE] = { };
     string msg = "";
-   
+
     while (1) {
         msg = "1~9 사이의 숫자 3개를 입력 하세요. \n<Number><Spacebar><Number><Spacebar><Number>형식으로 입력";
         send(sck_list[turn].sck, msg.c_str(), msg.size(), 0); //먼저들어온 사람에게 보낸다.
         ZeroMemory(buf, MAX_SIZE);
         if (recv(sck_list[turn].sck, buf, MAX_SIZE, 0) > 0) {
-            
+
             int memo[10] = { 0 }; // 클라이언트가 고른 숫자 3개 메모
 
             msg = buf;
 
-            if (!checkThreeNumber(msg, memo)) { //규칙에 맞게 작성됬는지 확인
+            if (!checkThreeNumber(msg, memo)) { 
                 send(sck_list[turn].sck, msg.c_str(), msg.size(), 0);
                 memo[10] = { 0, }; p.clear();
                 continue;
@@ -260,7 +305,7 @@ void game_manager(int turn) { // 쓰레드로 클라이언트에서 오는 데�
 void del_client(int idx) {
 
     closesocket(sck_list[idx].sck);
-    sck_list.erase(sck_list.begin() + idx); 
+    sck_list.erase(sck_list.begin() + idx);
     client_count--;
 }
 
@@ -288,7 +333,7 @@ int main() {
     if (!code) {
         server_init();
 
-        
+
         std::thread th1[MAX_CLIENT];
         for (int i = 0; i < MAX_CLIENT; i++) {
             // 인원 수 만큼 thread 생성해서 각각의 클라이언트가 동시에 소통할 수 있도록 함.
