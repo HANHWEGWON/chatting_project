@@ -1,7 +1,7 @@
-ï»¿#pragma comment(lib, "ws2_32.lib")
-#define _CRT_SECURE_NO_WARNINGS // í˜¹ì€ localtime_së¥¼ ì‚¬ìš©
+#pragma comment(lib, "ws2_32.lib")
+#define _CRT_SECURE_NO_WARNINGS //È¤Àº localtime_s¸¦ »ç¿ë
 
-#include <WinSock2.h> //Winsock í—¤ë”íŒŒì¼ include. WSADATA ë“¤ì–´ìˆìŒ.
+#include <WinSock2.h> //Winsock Çì´õÆÄÀÏ include. WSADATA µé¾îÀÖÀ½
 #include <WS2tcpip.h>
 #include <string>
 #include <sstream>
@@ -9,9 +9,13 @@
 #include <thread>
 #include <mysql/jdbc.h>
 #include <ctime>
+#include <windows.h>
+#include <cstdio> 
+#include <vector>
 
 #define MAX_SIZE 1024
 
+WSADATA wsa;
 using std::cout;
 using std::cin;
 using std::endl;
@@ -23,20 +27,40 @@ sql::Statement* stmt;
 sql::PreparedStatement* pstmt;
 sql::ResultSet* result;
 
-const string server = "tcp://127.0.0.1:3306"; // ë°ì´í„°ë² ì´ìŠ¤ ì£¼ì†Œ
-const string username = "root"; // ë°ì´í„°ë² ì´ìŠ¤ ì‚¬ìš©ì
-const string password = "1234"; // ë°ì´í„°ë² ì´ìŠ¤ ì ‘ì† ë¹„ë°€ë²ˆí˜¸
+const string server = "tcp://127.0.0.1:3306"; //µ¥ÀÌÅÍº£ÀÌ½º ÁÖ¼Ò
+const string username = "root"; //µ¥ÀÌÅÍº£ÀÌ½º »ç¿ëÀÚ
+const string db_password = "1234"; //µ¥ÀÌÅÍº£ÀÌ½º Á¢¼Ó ºñ¹Ğ¹øÈ£
 
+int all_color_num = 16;
+int delete_return = 0;
+const int special_word = 3; //ºñ¹Ğ¹øÈ£ ±ÔÄ¢
 SOCKET client_sock;
-string real_nickname;
+string id, password, real_nickname, user;
+SOCKADDR_IN client_addr = {};
+SOCKADDR_IN new_client = {};
+std::vector <string> bad_word = { "¹Ùº¸", "¸ÛÃ»ÀÌ" };
+int turn_flag = 0; //°ÔÀÓ ÅÏÀ» È®ÀÎÇÏ±â À§ÇÑ ÇÃ·¡±× º¯¼ö
 
 time_t timer;
 struct tm* t;
 
-void go_chatting(SOCKADDR_IN& client_addr);
+bool password_check(string);
+int chat_recv();
+void modify_user_info(string*, string*);
+void user_delete(string*, string*);
+void chat_history();
+void MenuList(SOCKADDR_IN&, string*, string*);
+void first_screen();
+void current_user(string);
+bool duplicate_current_user(string);
+void delete_current_user(string);
+void re_chat();
+void output_chat(char buf[MAX_SIZE]);
+void gameRoomFunction(string);
+void go_chatting(SOCKADDR_IN&, int);
+void my_info(string, string);
 
-namespace my_to_str
-{
+namespace my_to_str { //ÄÄÆÄÀÏ·¯ÀÇ Ç¥ÁØ ¹öÀüÀÌ ¾È ¸Â¾Æ¼­ to_string »ç¿ë ½Ã ¹®Á¦¹ß»ı
     template < typename T > std::string to_string(const T& n)
     {
         std::ostringstream stm;
@@ -44,33 +68,274 @@ namespace my_to_str
         return stm.str();
     }
 }
+enum ConsolColor {
+    CC_BLACK,
+    CC_DARKBLUE,
+    CC_DARKGREEN,
+    CC_DARKCYAN,
+    CC_DARKRED,
+    CC_DARKMAGENTA,
+    CC_DARKYELLOW,
+    CC_LIGHTGRAY,
+    CC_DARKGRAY,
+    CC_BLUE,
+    CC_GREEN,
+    CC_CYAN,
+    CC_RED,
+    CC_MAGENTA,
+    CC_YELLOW,
+    CC_WHITE,
+};
+const char* enum_str[] = {
+    "BLACK",
+    "DARKBLUE",
+    "DARKGREEN",
+    "DARKCYAN",
+    "DARKRED",
+    "DARKMAGENTA",
+    "DARKYELLOW",
+    "LIGHTGRAY",
+    "DARKGRAY",
+    "BLUE",
+    "GREEN",
+    "CYAN",
+    "RED",
+    "MAGENTA",
+    "YELLOW",
+    "WHITE",
+};
 
-void make_room() {
+typedef struct _Color {
+    int num = 1;
+    int color[10] = { CC_BLACK };
+    string user_nickname[10] = { "." };
+}Color;
 
+Color c;
+
+enum Modify {
+    MODIFY_ID,
+    MODIFY_PASSWORD,
+    MODIFY_NICKNAME,
+    MODIFY_EMAIL,
+    MODIFY_BACK,
+    MEMBER_INFORMATION,
+};
+enum Delete {
+    _DELETE,
+    YES_DELETE,
+    NO_DELETE,
+};
+enum Menu {
+    _MENU,
+    MENU_MODIFY,
+    MENU_CHAT,
+    MENU_DELETE,
+    MENU_MAIN,
+    MENU_GAME,
+};
+enum Main {
+    _MAIN,
+    MAIN_LOGIN,
+    MAIN_MEMBERSHIP,
+};
+
+void to_clean() {
+    system("cls");
 }
 
+void setFontColor(int color) { //ÅØ½ºÆ® »ö»ó º¯°æ
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info);
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), (info.wAttributes & 0xf0) | (color & 0xf));
+}
 
-string check_date() {
-    timer = time(NULL); // 1970ë…„ 1ì›” 1ì¼ 0ì‹œ 0ë¶„ 0ì´ˆë¶€í„° ì‹œì‘í•˜ì—¬ í˜„ì¬ê¹Œì§€ì˜ ì´ˆ
-    t = localtime(&timer); // í¬ë§·íŒ…ì„ ìœ„í•´ êµ¬ì¡°ì²´ì— ë„£ê¸°
-    string to_date;
+void setColor(int color, int bgcolor) { //ÅØ½ºÆ® & ¹è°æ »ö»ó º¯°æ
+    color &= 0xf;
+    bgcolor &= 0xf;
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE),
+        (bgcolor << 4) | color);
+}
 
-    to_date = my_to_str::to_string(t->tm_year + 1900) + "-" + my_to_str::to_string(t->tm_mon + 1) + "-"
-        + my_to_str::to_string(t->tm_mday);
-    return to_date;
+bool email_check(string email) { //ÀÌ¸ŞÀÏ ±ÔÄ¢ °Ë»ç
+    if (email.find("@") == string::npos) {
+        return false;
+    }
+    else if (email.find(".com") == string::npos) {
+        return false;
+    }
+    else if (email.find(".com") < email.find("@")) {
+        return false;
+    }
+    else if (email.find("@") == 0) {
+        return false;
+    }
+    else
+        return true;
 }
 
 string check_timestamp() {
-    timer = time(NULL); // 1970ë…„ 1ì›” 1ì¼ 0ì‹œ 0ë¶„ 0ì´ˆë¶€í„° ì‹œì‘í•˜ì—¬ í˜„ì¬ê¹Œì§€ì˜ ì´ˆ
-    t = localtime(&timer); // í¬ë§·íŒ…ì„ ìœ„í•´ êµ¬ì¡°ì²´ì— ë„£ê¸°
+    timer = time(NULL); //1970³â 1¿ù 1ÀÏ 0½Ã 0ºĞ 0ÃÊºÎÅÍ ½ÃÀÛÇÏ¿© ÇöÀç±îÁöÀÇ ÃÊ
+    t = localtime(&timer); //Æ÷¸ËÆÃÀ» À§ÇØ ±¸Á¶Ã¼¿¡ ³ÖÀ½
     string to_timestamp;
 
     to_timestamp = my_to_str::to_string(t->tm_year + 1900) + "-" + my_to_str::to_string(t->tm_mon + 1) + "-"
         + my_to_str::to_string(t->tm_mday) + "-" + my_to_str::to_string(t->tm_hour)
         + "-" + my_to_str::to_string(t->tm_min) + "-" + my_to_str::to_string(t->tm_sec);
+
     return to_timestamp;
 }
 
+bool login_possible(string possible_id, string possible_password) { //·Î±×ÀÎ
+    string check_id, check_pw;
+
+    pstmt = con->prepareStatement("SELECT * FROM user where user_id=? and password=?;");
+    pstmt->setString(1, possible_id);
+    pstmt->setString(2, possible_password);
+    pstmt->execute();
+    result = pstmt->executeQuery(); //µ¥ÀÌÅÍº£ÀÌ½º¿¡¼­ id¿Í password¸¦ °¡Á®¿È
+    while (result->next()) {
+        check_id = result->getString(1).c_str();
+        check_pw = result->getString(2).c_str();
+        real_nickname = result->getString(3).c_str();
+    }
+    if (check_id == possible_id && check_pw == possible_password) {
+        if (duplicate_current_user(possible_id)) {
+            cout << "·Î±×ÀÎ µÇ¾ú½À´Ï´Ù." << endl;
+            current_user(possible_id);
+            Sleep(2000);
+            to_clean();
+            return true;
+        }
+        else {
+            cout << "ÇöÀç Á¢¼Ó ÁßÀÎ °èÁ¤ÀÔ´Ï´Ù." << endl;
+            Sleep(2000);
+            to_clean();
+        }
+    }
+    else {
+        cout << "·Î±×ÀÎ¿¡ ½ÇÆĞÇß½À´Ï´Ù." << endl;
+        Sleep(2000);
+        to_clean();
+        return false;
+    }
+}
+
+void chat_history() { //À¯Àú ÀÔÀå ½Ã SERVER·Î ºÎÅÍ 1À» ¹ŞÀ¸¸é Ã¤ÆÃ Àü¹®À» µ¥ÀÌÅÍº£ÀÌ½º·ÎºÎÅÍ ¹Ş¾Æ¿È
+    pstmt = con->prepareStatement("select * from chatting");
+    pstmt->execute();
+    result = pstmt->executeQuery();
+    while (result->next()) {
+        cout << result->getString(2) << " [" + result->getString(3) + "] :" << result->getString(1) << '\n';
+    }
+}
+
+void re_chat() { //socketÀ» ´İÀº ÈÄ, »õ·Î¿î socket »ı¼º
+    closesocket(client_sock);
+    WSACleanup();
+
+    int code = WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    if (!code) {
+        client_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+        client_addr.sin_family = AF_INET;
+        client_addr.sin_port = htons(7777);
+        InetPton(AF_INET, TEXT("127.0.0.1"), &client_addr.sin_addr);
+    }
+}
+
+void go_chatting(SOCKADDR_IN& client_addr, int port_num) { //Ã¤ÆÃ¹æ ÀÔÀå ÇÔ¼ö
+    client_addr.sin_port = htons(port_num);
+
+    while (1) {
+        if (!connect(client_sock, (SOCKADDR*)&client_addr, sizeof(client_addr))) {
+            if (port_num == 7777) cout << "Server Connect" << endl; //sin_port = 7777 -> Ã¤ÆÃ ¼­¹ö ÀÔÀå
+            if (port_num == 6666) cout << "gameServer Connect" << endl; //sin_port = 6666 -> °ÔÀÓ ¼­¹ö ÀÔÀå
+            send(client_sock, real_nickname.c_str(), real_nickname.length(), 0);
+            break;
+        }
+        cout << "Connecting..." << endl;
+    }
+    if (port_num == 6666) {
+        char buf[MAX_SIZE] = { };
+        string msg = "", text = "";
+        while (1) {
+            ZeroMemory(&buf, MAX_SIZE);
+            if (recv(client_sock, buf, MAX_SIZE, 0) > 0) {
+                msg = buf;
+                cout << msg << endl;
+                if (msg.find("1~9 »çÀÌÀÇ ¼ıÀÚ 3°³¸¦ ÀÔ·Â ÇÏ¼¼¿ä.") != string::npos) {
+                    std::getline(cin, text);
+                    send(client_sock, text.c_str(), text.size(), 0);
+                    continue;
+                }
+                else if (msg.find("******** ÃàÇÏÇÕ´Ï´Ù") != string::npos) {
+
+                    text = "end_game";
+                    send(client_sock, text.c_str(), text.size(), 0);
+                    Sleep(2000);
+                    to_clean();
+                    closesocket(client_sock);
+                    re_chat();
+                    MenuList(client_addr, &id, &password); //°ÔÀÓ Á¾·á -> ¸Ş´º·Î ÀÌµ¿
+                    return;
+                }
+            }
+        }
+    }
+    std::thread th_recv(chat_recv);
+
+    while (1) {
+        string text;
+        std::getline(cin, text);
+        const char* buffer = text.c_str(); //stringÇüÀ» char* Å¸ÀÔÀ¸·Î º¯È¯
+
+        if (text == "") { continue; } //enter -> db ÀúÀå x
+        if (text == "/back") { //µÚ·Î°¡±â ±â´É
+            send(client_sock, buffer, strlen(buffer), 0);
+            re_chat();
+            MenuList(client_addr, &id, &password);
+            break;
+        }
+        else {
+            if (text != "/help" && text.find("/color") == string::npos && text.substr(0, 3) != "/dm") {
+                pstmt = con->prepareStatement("insert into chatting(message_content, send_time, user_nickname) values(?, ?, ?)");
+                pstmt->setString(1, text);
+                pstmt->setString(2, check_timestamp());
+                pstmt->setString(3, real_nickname);
+                pstmt->execute();
+            } //¸í·É¾î Ã¤ÆÃ³»¿ª db¿¡ ÀúÀå x
+        }
+        if (text == "/help") { //»ç¿ëÀÚ µµ¿ò ¸í·É¾î
+            setFontColor(CC_YELLOW);
+            cout << "/dm <´Ğ³×ÀÓ> <¸Ş½ÃÁö>  : Æ¯Á¤ À¯Àú¿¡°Ô¸¸ ¸Ş½ÃÁö¸¦ Àü¼ÛÇÏ°í, ´Ù¸¥ À¯Àú¿¡°Ô´Â Ç¥½ÃµÇÁö ¾Ê½À´Ï´Ù.\n";
+            cout << "/dm_msg                : À¯Àú°¡ ¹ŞÀº DM¸¸À» Ç¥½ÃÇÕ´Ï´Ù.\n";
+            cout << "/color <»ö»ó> <´Ğ³×ÀÓ> : Æ¯Á¤ À¯ÀúÀÇ ¸Ş½ÃÁö »ö»óÀ» º¯°æ½ÃÅµ´Ï´Ù.(/color ¸í·É¾î : »ö»ó Á¤º¸)\n";
+            cout << "/back                  : ¸Ş´ºÈ­¸éÀ¸·Î µ¹¾Æ°¡´Â ¸í·É¾îÀÔ´Ï´Ù.\n";
+            setColor(CC_LIGHTGRAY, CC_BLACK);
+            continue;
+        }
+        if (text == "/color") {
+            for (int color = 0; color < all_color_num; color++) {
+                setFontColor(CC_YELLOW);
+                cout << color << " : " << enum_str[color] << endl;
+            }setColor(CC_LIGHTGRAY, CC_BLACK);
+            continue;
+        }
+
+        for (int i = 0; i < 2; i++) {
+            if (text.find(bad_word[i]) != string::npos) { //¿å¼³ ½Ã ÅğÀå. socketÀ» ´İ°í, ´Ù½Ã socket »ı¼º
+                send(client_sock, buffer, strlen(buffer), 0);
+                re_chat();
+                MenuList(client_addr, &id, &password);
+                break;
+            }
+        }
+        send(client_sock, buffer, strlen(buffer), 0);
+    }
+    th_recv.join();
+    closesocket(client_sock);
+}
 
 int chat_recv() {
     char buf[MAX_SIZE] = { };
@@ -79,11 +344,30 @@ int chat_recv() {
     while (1) {
         ZeroMemory(&buf, MAX_SIZE);
         if (recv(client_sock, buf, MAX_SIZE, 0) > 0) {
+
             msg = buf;
-            std::stringstream ss(msg);  // ë¬¸ìì—´ì„ ìŠ¤íŠ¸ë¦¼í™”
-            string user;
-            ss >> user; // ìŠ¤íŠ¸ë¦¼ì„ í†µí•´, ë¬¸ìì—´ì„ ê³µë°± ë¶„ë¦¬í•´ ë³€ìˆ˜ì— í• ë‹¹. ë³´ë‚¸ ì‚¬ëŒì˜ ì´ë¦„ë§Œ userì— ì €ì¥ë¨.
-            if (user != real_nickname) cout << buf << endl; // ë‚´ê°€ ë³´ë‚¸ ê²Œ ì•„ë‹ ê²½ìš°ì—ë§Œ ì¶œë ¥í•˜ë„ë¡.
+            std::stringstream ss(msg); //¹®ÀÚ¿­À» ½ºÆ®¸²È­
+            ss >> user; //½ºÆ®¸²À» ÅëÇØ, ¹®ÀÚ¿­À» °ø¹é ºĞ¸®ÇØ º¯¼ö¿¡ ÇÒ´ç. º¸³½ »ç¶÷ÀÇ ÀÌ¸§¸¸ user¿¡ ÀúÀåµÊ.
+            if (msg == "1") { //server·Î ºÎÅÍ 1À» ¹ŞÀ¸¸é db¸¦ ºÒ·¯¿À´Â ÇÔ¼ö ½ÇÇà
+                chat_history(); continue;
+            }
+            if (msg.substr(0, 6) == "/color") {
+                std::stringstream s(msg);
+                string nick, color;
+                while (s >> nick >> color) {
+                    if (nick != "/color") {
+                        break;
+                    }
+                }
+                c.color[c.num] = stoi(color); //¿øÇÏ´Â »ö»ó°ú Æ¯Á¤ À¯ÀúÀÇ ´Ğ³×ÀÓÀ» ±¸Á¶Ã¼¿¡ ÀúÀå
+                c.user_nickname[c.num] = nick;
+                c.num++;
+                continue;
+            }
+
+            std::thread th_color(output_chat, buf);
+
+            th_color.join();
         }
         else {
             cout << "Server Off" << endl;
@@ -92,194 +376,392 @@ int chat_recv() {
     }
 }
 
-void join_membership() {
-    string id, password, nickname, email;
-    string correct_id, correct_password;
+void output_chat(char buf[MAX_SIZE]) { //»ö»ó º¯°æ ´ë»ó À¯ÀúÀÇ Ãª -> Áßº¹ Ãâ·Â ¹æÁö
 
-    while (1) {
-        cout << "ì‚¬ìš©í•  ì•„ì´ë””ë¥¼ ì…ë ¥í•´ì£¼ì„¸ìš”. >> ";
-        cin >> id;
+    for (int i = 0; i < c.num; i++) {
+        if (user == c.user_nickname[i]) {
+            setFontColor(c.color[i]);
 
-        pstmt = con->prepareStatement("SELECT * FROM user where user_id=? ;"); //ìœ ì € idì˜ ì¤‘ë³µ ì²´í¬ë¥¼ ìœ„í•œ selectë¬¸
-        pstmt->setString(1, id);
+            cout << buf << endl;
 
+            setColor(CC_LIGHTGRAY, CC_BLACK); //±âÁ¸ »ö»ó.
+            return;
+        }
+    }
+    if (user != real_nickname) {
+        setColor(CC_LIGHTGRAY, CC_BLACK);
+        cout << buf << endl;
+        return;
+    }//³»°¡ º¸³½ °Ô ¾Æ´Ò °æ¿ì¿¡¸¸ Ãâ·ÂÇÏµµ·Ï
+}
+
+void MenuList(SOCKADDR_IN& client_addr, string* menu_id, string* menu_password) {
+    int num = 0;
+
+    to_clean();
+    cout << "¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù\n";
+    cout << "¡Ú                                                  ¡Ú\n";
+    cout << "¡Ù                                                  ¡Ù\n";
+    cout << "¡Ú                                                  ¡Ú\n";
+    cout << "¡Ù                  1. È¸¿øÁ¤º¸                     ¡Ù\n";
+    cout << "¡Ú                                                  ¡Ú\n";
+    cout << "¡Ù                                                  ¡Ù\n";
+    cout << "¡Ù                  2. Ã¤ÆÃ¹æ ÀÔÀå                  ¡Ù\n";
+    cout << "¡Ú                                                  ¡Ú\n";
+    cout << "¡Ù                                                  ¡Ù\n";
+    cout << "¡Ú                  3. È¸¿øÅ»Åğ                     ¡Ú\n";
+    cout << "¡Ù                                                  ¡Ù\n";
+    cout << "¡Ú                                                  ¡Ú\n";
+    cout << "¡Ù                  4. ·Î±×¾Æ¿ô                     ¡Ù\n";
+    cout << "¡Ú                                                  ¡Ú\n";
+    cout << "¡Ù                                                  ¡Ù\n";
+    cout << "¡Ú                  5. °ÔÀÓ¹æ ÀÔÀå                  ¡Ú\n";
+    cout << "¡Ù                                                  ¡Ù\n";
+    cout << "¡Ú                                                  ¡Ú\n";
+    cout << "¡Ù                                                  ¡Ù\n";
+    cout << "¡Ú                                                  ¡Ú\n";
+    cout << "¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù\n";
+
+    cin >> num;
+    
+    string temp;
+    getline(cin, temp);
+    to_clean();
+    switch (num) {
+    case MENU_MODIFY:
+        modify_user_info(menu_id, menu_password);
+        MenuList(client_addr, menu_id, menu_password); //È¸¿øÁ¤º¸ ¼öÁ¤ÀÌ ¿Ï·áµÈ ÈÄ ´Ù½Ã ¸Ş´º·Î ÀÌµ¿
+        break;
+    case MENU_CHAT:
+        setFontColor(CC_YELLOW);
+        cout << "\n\n\n\n\n\n\n\t\t/help ¸í·É¾î´Â »ç¿ëÀÚ¿¡°Ô ¸í·É¾î ¸ñ·ÏÀ» Á¦°øÇÕ´Ï´Ù. ¢¾";
+        setColor(CC_LIGHTGRAY, CC_BLACK); //±âÁ¸ »ö»ó
+        Sleep(3000);
+        to_clean();
+        go_chatting(client_addr, 7777); //Ã¤ÆÃ ¼­¹ö ÀÔÀå
+        break;
+    case MENU_DELETE:
+        user_delete(menu_id, menu_password);
+        if (delete_return) {
+            break;
+        }
+        else {
+            MenuList(client_addr, menu_id, menu_password);
+            break;
+        }
+    case MENU_MAIN:
+        delete_current_user(*menu_id); //·Î±×¾Æ¿ô ½Ã ÇöÀç Á¢¼ÓÁßÀÎ À¯Àú Å×ÀÌºí¿¡¼­ »èÁ¦
+        first_screen();
+        break;
+    case MENU_GAME:
+        to_clean();
+        go_chatting(client_addr, 6666); //°ÔÀÓ ¼­¹ö ÀÔÀå
+        break;
+
+    }
+}
+
+void modify_user_info(string* modify_id, string* password) {
+    string new_info;
+    int what_modify = 0;
+
+    cout << "1.ºñ¹Ğ¹øÈ£  2.´Ğ³×ÀÓ  3.ÀÌ¸ŞÀÏ  4.µÚ·Î°¡±â  5.È¸¿øÁ¤º¸È®ÀÎ" << endl;
+    cout << "¿øÇÏ½Ã´Â Ç×¸ñÀ» ¼±ÅÃÇØÁÖ¼¼¿ä. >> ";
+    cin >> what_modify;
+
+    switch (what_modify) {
+    case MODIFY_PASSWORD:
+        cout << "»õ·Î¿î ºñ¹Ğ¹øÈ£¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä. (!, ?, # Áß 1°³ ÀÌ»ó Æ÷ÇÔ) >> ";
+        while (1) {
+            cin >> new_info;
+            if (password_check(new_info)) {
+                pstmt = con->prepareStatement("UPDATE user set password = ? where user_id = ?");
+                pstmt->setString(1, new_info);
+                pstmt->setString(2, *modify_id);
+                pstmt->execute();
+                *password = new_info;
+                cout << "¼º°øÀûÀ¸·Î Á¤º¸°¡ ¼öÁ¤µÇ¾ú½À´Ï´Ù." << endl;
+                Sleep(1000);
+                break;
+            }
+            else {
+                cout << "ºñ¹Ğ¹øÈ£ Çü½Ä¿¡ ¸ÂÃç¼­ ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+                continue;
+            }
+        }break;
+    case MODIFY_NICKNAME:
+        cout << "»õ·Î¿î ´Ğ³×ÀÓÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+        cin >> new_info;
+        pstmt = con->prepareStatement("UPDATE user set nickname = ? where user_id = ?");
+        pstmt->setString(1, new_info);
+        pstmt->setString(2, *modify_id);
         pstmt->execute();
+        cout << "¼º°øÀûÀ¸·Î Á¤º¸°¡ ¼öÁ¤µÇ¾ú½À´Ï´Ù." << endl;
+        real_nickname = new_info;
+        Sleep(1000);
+        break;
+    case MODIFY_EMAIL:
+        cout << "»õ·Î¿î ÀÌ¸ŞÀÏÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+        while (1) {
+            cin >> new_info;
+            if (email_check(new_info)) {
+                pstmt = con->prepareStatement("UPDATE user set email = ? where user_id = ?");
+                pstmt->setString(1, new_info);
+                pstmt->setString(2, *modify_id);
+                pstmt->execute();
+                cout << "¼º°øÀûÀ¸·Î Á¤º¸°¡ ¼öÁ¤µÇ¾ú½À´Ï´Ù." << endl;
+                Sleep(2000);
+                break;
+            }
+            else {
+                cout << "ÀÌ¸ŞÀÏ Çü½Ä¿¡ ¸ÂÃç¼­ ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+                continue;
+            }
+        }
+        break;
+    case MODIFY_BACK:
+        break;
+    case MEMBER_INFORMATION:
+        my_info(*modify_id, *password);
+        break;
+    }
+}
 
+void my_info(string id, string pwd) {
+    pstmt = con->prepareStatement("SELECT * FROM user where user_id = ? and password = ?");
+    pstmt->setString(1, id);
+    pstmt->setString(2, pwd);
+    pstmt->execute();
+    result = pstmt->executeQuery();
+
+    cout << "³»Á¤º¸-------------------------\n";
+    while (result->next()) {
+        cout << "ID:" << result->getString(1) << "\nPW:" << result->getString(2) << "\n´Ğ³×ÀÓ:" << result->getString(3) << "\nemail:" << result->getString(4) << "\n------------------------------";
+    }
+    Sleep(5000);
+    to_clean();
+}
+
+void user_delete(string* id, string* password) {
+    int yes_or_no = 0;
+    string delete_password;
+
+    cout << "È¸¿øÅ»Åğ¸¦ ÇÒ °æ¿ì ¸ğµç ´ëÈ­ ³»¿ëÀÌ »ç¶óÁı´Ï´Ù." << endl
+        << "°è¼Ó ÁøÇàÇÏ½Ã°Ú½À´Ï±î? (1. ¿¹  2. ¾Æ´Ï¿À) >> ";
+    cin >> yes_or_no;
+
+    switch (yes_or_no) {
+    case YES_DELETE:
+        cout << "¾ÈÀüÇÑ È¸¿øÅ»Åğ¸¦ À§ÇØ, ºñ¹Ğ¹øÈ£¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+        cin >> delete_password;
+        if (delete_password == *password) {
+            pstmt = con->prepareStatement("DELETE FROM user where password = ?");
+            pstmt->setString(1, *password);
+            pstmt->execute();
+            cout << "¼º°øÀûÀ¸·Î È¸¿øÅ»Åğ°¡ µÇ¾ú½À´Ï´Ù." << endl;
+            delete_current_user(*id);
+            delete_return = 1;
+            Sleep(2000);
+            to_clean();
+            break;
+        }
+        else {
+            cout << "¿Ã¹Ù¸£Áö ¾ÊÀº ºñ¹Ğ¹øÈ£¸¦ ÀÔ·ÂÇÏ¼Ì½À´Ï´Ù." << endl;
+            delete_return = 0;
+            Sleep(2000);
+            break;
+        }
+    case NO_DELETE:
+        delete_return = 0;
+        break;
+    }
+}
+
+void current_user(string current_id) { //ÇöÀç Á¢¼Ó ÁßÀÎ À¯Àú Å×ÀÌºí
+    pstmt = con->prepareStatement("INSERT INTO connecting_user(user_id) values(?)");
+    pstmt->setString(1, current_id);
+    pstmt->execute();
+}
+
+void delete_current_user(string delete_id) { //·Î±×¾Æ¿ô ½Ã ÇØ´ç À¯Àú¸¦ Å×ÀÌºí¿¡¼­ »èÁ¦
+    pstmt = con->prepareStatement("DELETE FROM connecting_user where user_id = ?");
+    pstmt->setString(1, delete_id);
+    pstmt->execute();
+}
+
+bool duplicate_current_user(string duplicate_current_id) { //ÇØ´ç À¯Àú°¡ ÀÌ¹Ì Á¢¼Ó ÁßÀÌ¸é ·Î±×ÀÎ ºÒ°¡
+    string current_id;
+
+    pstmt = con->prepareStatement("SELECT * FROM connecting_user");
+    pstmt->execute();
+    result = pstmt->executeQuery();
+
+    while (result->next()) {
+        current_id = result->getString(1).c_str();
+    }
+    if (current_id == duplicate_current_id) {
+        return false;
+    }
+    else return true;
+}
+
+bool password_check(string a) {
+    char special_char[special_word] = { '!', '?', '#' }; //!, ?, # Áß ÇÏ³ª¸¦ ¹İµå½Ã Æ÷ÇÔÇÏ¿© ºñ¹Ğ¹øÈ£ ±¸¼º
+    for (char c : special_char) {
+        if (a.find(c) != string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void join_membership() {
+    string membership_id, membership_password, nickname, email;
+    string correct_id, correct_password;
+    to_clean();
+    while (1) {
+        cout << "»ç¿ëÇÒ ¾ÆÀÌµğ¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+        cin >> membership_id;
+
+        pstmt = con->prepareStatement("SELECT * FROM user where user_id=? ;"); //À¯Àú idÀÇ Áßº¹ Ã¼Å©¸¦ À§ÇÑ select¹®
+        pstmt->setString(1, membership_id);
+        pstmt->execute();
         result = pstmt->executeQuery();
+
         while (result->next()) {
             correct_id = result->getString(1).c_str();
         }
-        if (correct_id == id) {
-            cout << "ì´ë¯¸ ì‚¬ìš©ì¤‘ì¸ ì•„ì´ë””ì…ë‹ˆë‹¤." << endl;
+        if (correct_id == membership_id) {
+            cout << "ÀÌ¹Ì »ç¿ëÁßÀÎ ¾ÆÀÌµğÀÔ´Ï´Ù." << endl;
         }
-        else if (correct_id != id) {
-            cout << "ì‚¬ìš©í•  ë¹„ë°€ë²ˆí˜¸ë¥¼ ì…ë ¥í•´ì£¼ì„¸ìš” >> ";
-            cin >> password;
-            cout << "ë‹‰ë„¤ì„ì„ ì…ë ¥í•´ì£¼ì„¸ìš” >> ";
+        else if (correct_id != membership_id) {
+            id = membership_id;
+            while (1) {
+                cout << "»ç¿ëÇÒ ºñ¹Ğ¹øÈ£¸¦ ÀÔ·ÂÇØÁÖ¼¼¿ä. (!, ?, # Áß 1°³ ÀÌ»ó Æ÷ÇÔ) >> ";
+                cin >> membership_password;
+                if (password_check(membership_password)) {
+                    password = membership_password;
+                    break;
+                }
+                continue;
+            }
+            cout << "´Ğ³×ÀÓÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä >> ";
             cin >> nickname;
-            cout << "ì´ë©”ì¼ì„ ì…ë ¥í•´ì£¼ì„¸ìš” >> ";
-            cin >> email;
+            real_nickname = nickname;
+            cout << "ÀÌ¸ŞÀÏÀ» ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+            while (1) {
+                cin >> email;
+                if (email_check(email)) {
+                    break;
+                }
+                else {
+                    cout << "ÀÌ¸ŞÀÏ Çü½Ä¿¡ ¸ÂÃç¼­ ÀÔ·ÂÇØÁÖ¼¼¿ä. >> ";
+                    continue;
+                }
+            }
             break;
         }
     }
-    //ì•„ì´ë”” ì¤‘ë³µ ì²´í¬ê°€ ëë‚˜ë©´ ë¹„ë°€ë²ˆí˜¸ ì´ë¦„ì„ userí…Œì´ë¸”ì— ì €ì¥í•œë‹¤.
+    //¾ÆÀÌµğ Áßº¹ Ã¼Å©°¡ ³¡³ª¸é ºñ¹Ğ¹øÈ£ ÀÌ¸§À» userÅ×ÀÌºí¿¡ ÀúÀå
     pstmt = con->prepareStatement("insert into user(user_id, password, nickname, email) values(?,?,?,?)");
-    pstmt->setString(1, id);
-    pstmt->setString(2, password);
+    pstmt->setString(1, membership_id);
+    pstmt->setString(2, membership_password);
     pstmt->setString(3, nickname);
     pstmt->setString(4, email);
     pstmt->execute();
-    cout << "íšŒì›ê°€ì…ì´ ì™„ë£Œë˜ì—ˆìŠµë‹ˆë‹¤." << endl;
 
-}
-//void message_store(string check_id) {
-//
-//    string store_id, store_msg; //clientí…Œì´ë¸”ì—ì„œ idë‘,chattingë‚´ìš©ì„ ë‹´ì„ ë³€ìˆ˜ 
-//
-//    bool id = true;
-//    cout << "ì €ì¥ëœ ë‚´ìš©" << endl;
-//    con->setSchema("login");
-//    pstmt = con->prepareStatement("SELECT * FROM chatting_massenger;");
-//    result = pstmt->executeQuery();
-//    while (result->next()) {
-//        store_id = result->getString("id").c_str();
-//        store_msg = result->getString("text").c_str();
-//        //ì²˜ìŒ ì…ì¥í•´ì„œ ì±„íŒ…ë‚´ìš©ì´ ì—†ìœ¼ë©´ ì „ ë‚´ìš©ì„ ëª»ë³´ê²Œ ì„¤ì •
-//        if (store_id == check_id)
-//        {
-//            id = false;
-//        }
-//        if (id == false)
-//        {
-//            cout << store_id << " : " << store_msg << endl;
-//        }
-//    }
-//}
-
-// 2023_10_11 ì—…ë°ì´íŠ¸ (ë¡œê·¸ì¸ ê°€ëŠ¥ì—¬ë¶€)
-bool login_possible(string id, string password) {
-   
-    string check_id, check_pw;
-    
-    pstmt = con->prepareStatement("SELECT * FROM user where user_id=? and password=?;");
-    pstmt->setString(1, id);
-    pstmt->setString(2, password);
+    //µ¿½Ã¿¡ win_lose Å×ÀÌºí¿¡ È¸¿ø°¡ÀÔÇÑ clientÀÇ id ÀúÀå(°ÔÀÓ ·©Å·)
+    pstmt = con->prepareStatement("insert into win_lose(win, lose, user_id) values(?, ?, ?)");
+    pstmt->setInt(1, 0);
+    pstmt->setInt(2, 0);
+    pstmt->setString(3, membership_id);
     pstmt->execute();
-    result = pstmt->executeQuery(); //ë°ì´í„°ë² ì´ìŠ¤ì—ì„œ id ì™€ password ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
-    while (result->next()) {
-        check_id = result->getString(1).c_str();
-        check_pw = result->getString(2).c_str();
-        real_nickname = result->getString(3).c_str();
-    }
-    if (check_id == id && check_pw == password) {
-        cout << "ë¡œê·¸ì¸ ë˜ì—ˆìŠµë‹ˆë‹¤." << endl;
-        return true;
-    }
-    else {
-        cout << "ë¡œê·¸ì¸ì— ì‹¤íŒ¨í–ˆìŠµë‹ˆë‹¤." << endl;
-        return false;
-    }
+
+    cout << "È¸¿ø°¡ÀÔÀÌ ¿Ï·áµÇ¾ú½À´Ï´Ù.¢¾" << endl;
+    Sleep(2000);
+    to_clean();
 }
 
+void first_screen() { //½ÃÀÛ È­¸é
+    int client_choose = 0;
+    while (1) {
+        cout << "¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù\n";
+        cout << "¡Ú                                                  ¡Ú\n";
+        cout << "¡Ù                                                  ¡Ù\n";
+        cout << "¡Ú                                                  ¡Ú\n";
+        cout << "¡Ù                                                  ¡Ù\n";
+        cout << "¡Ú                                                  ¡Ú\n";
+        cout << "¡Ù                                                  ¡Ù\n";
+        cout << "¡Ú                                                  ¡Ú\n";
+        cout << "¡Ù                                                  ¡Ù\n";
+        cout << "¡Ù     ¡Ú¡Ú¡Ú¡Ú¡Ú      ¡Ú      ¡Ú       ¡Ú  ¡Ú      ¡Ù\n";
+        cout << "¡Ú         ¡Ú        ¡Ú ¡Ú     ¡Ú       ¡Ú¡Ú        ¡Ú\n";
+        cout << "¡Ù         ¡Ú       ¡Ú¡Ú¡Ú¡Ú   ¡Ú       ¡Ú ¡Ú       ¡Ù\n";
+        cout << "¡Ú         ¡Ú     ¡Ú       ¡Ú  ¡Ú¡Ú¡Ú¡Ú ¡Ú   ¡Ú     ¡Ú\n";
+        cout << "¡Ù                                                  ¡Ù\n";
+        cout << "¡Ú                                                  ¡Ú\n";
+        cout << "¡Ù              1. ·Î±×ÀÎ   2. È¸¿ø°¡ÀÔ             ¡Ù\n";
+        cout << "¡Ú                                                  ¡Ú\n";
+        cout << "¡Ù                                                  ¡Ù\n";
+        cout << "¡Ú                                                  ¡Ú\n";
+        cout << "¡Ù                                                  ¡Ù\n";
+        cout << "¡Ú                                                  ¡Ú\n";
+        cout << "¡Ù                                                  ¡Ù\n";
+        cout << "¡Ú                                                  ¡Ú\n";
+        cout << "¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù¡Ú¡Ù\n";
 
-// 2023_10_11 ì—…ë°ì´íŠ¸ (ë¡œê·¸ì¸ ì„±ê³µì‹œ ë©”ë‰´)
-void MenuList(SOCKADDR_IN& client_addr, string id, string password) {
-    int num;
-    cout << "1. íšŒì›ì •ë³´ìˆ˜ì • 2. ì±„íŒ…ë°© ì…ì¥ 3. íšŒì›íƒˆí‡´\n";
-    cin >> num;
-    while (true) {
-        switch (num) {
-        case 1:
-            //modify_user_info(id, password);
-            break;
-        case 2:
-            go_chatting(client_addr);
-            break;
-        case 3:
-            //user_delete(id, password);
-            break;
+        cin >> client_choose;
+
+        if (client_choose == MAIN_LOGIN) { //·Î±×ÀÎ
+            cout << "ID :";
+            cin >> id;
+            cout << "PW :";
+            cin >> password;
+            bool check = login_possible(id, password);
+            if (!check) continue; //·Î±×ÀÎ ½ÇÆĞ ½Ã ´Ù½Ã mainÀ¸·Î
+            MenuList(client_addr, &id, &password); //·Î±×ÀÎ ¼º°ø ½Ã ¸Ş´º·Î
+            continue; //È¸¿øÅ»Åğ ÈÄ mainÀ¸·Î ¿Àµµ·Ï
+        }
+        if (client_choose == MAIN_MEMBERSHIP) { //È¸¿ø°¡ÀÔ
+            join_membership();
+            continue;
         }
     }
-}
-
-// 2023_10_11 ì—…ë°ì´íŠ¸ (ë©”ë‰´ë¦¬ìŠ¤íŠ¸ - ì±„íŒ…ë°© ì…ì¥ í•¨ìˆ˜)
-void go_chatting(SOCKADDR_IN &client_addr) {        //ì±—íŒ…ë°© ì…ì¥ í•¨ìˆ˜
-    //ë¡œê·¸ì¸í›„ ì„œë²„ì™€ ì»¤ë„¥íŠ¸ í•œë‹¤.
-    while (1) {
-        if (!connect(client_sock, (SOCKADDR*)&client_addr, sizeof(client_addr))) {
-            cout << "Server Connect" << endl;
-            send(client_sock, real_nickname.c_str(), real_nickname.length(), 0);
-            break;
-        }
-        cout << "Connecting..." << endl;
-    }
-
-    std::thread th2(chat_recv);
-    //message_store(check_id);
-    while (1) {
-        string text;
-        std::getline(cin, text);
-        const char* buffer = text.c_str(); // stringí˜•ì„ char* íƒ€ì…ìœ¼ë¡œ ë³€í™˜
-        send(client_sock, buffer, strlen(buffer), 0);
-    }
-    th2.join();
-    closesocket(client_sock);
 }
 
 int main() {
-    WSADATA wsa;
-    int client_choose = 0;
     bool login = true;
-    // Winsockë¥¼ ì´ˆê¸°í™”í•˜ëŠ” í•¨ìˆ˜. MAKEWORD(2, 2)ëŠ” Winsockì˜ 2.2 ë²„ì „ì„ ì‚¬ìš©í•˜ê² ë‹¤ëŠ” ì˜ë¯¸.
-     // ì‹¤í–‰ì— ì„±ê³µí•˜ë©´ 0ì„, ì‹¤íŒ¨í•˜ë©´ ê·¸ ì´ì™¸ì˜ ê°’ì„ ë°˜í™˜.
-     // 0ì„ ë°˜í™˜í–ˆë‹¤ëŠ” ê²ƒì€ Winsockì„ ì‚¬ìš©í•  ì¤€ë¹„ê°€ ë˜ì—ˆë‹¤ëŠ” ì˜ë¯¸.
+
     int code = WSAStartup(MAKEWORD(2, 2), &wsa);
+    //Winsock¸¦ ÃÊ±âÈ­ÇÏ´Â ÇÔ¼ö. MAKEWORD(2, 2)´Â WinsockÀÇ 2.2 ¹öÀüÀ» »ç¿ëÇÏ°Ú´Ù´Â ÀÇ¹Ì
+    //½ÇÇà¿¡ ¼º°øÇÏ¸é 0À», ½ÇÆĞÇÏ¸é ±× ÀÌ¿ÜÀÇ °ªÀ» ¹İÈ¯
+    //0À» ¹İÈ¯Çß´Ù´Â °ÍÀº WinsockÀ» »ç¿ëÇÒ ÁØºñ°¡ µÇ¾ú´Ù´Â ÀÇ¹Ì
 
     try {
         driver = sql::mysql::get_mysql_driver_instance();
-        con = driver->connect(server, username, password);
+        con = driver->connect(server, username, db_password);
     }
     catch (sql::SQLException& e) {
         cout << "Could not connect to server. Error message: " << e.what() << endl;
         exit(1);
     }
+
     con->setSchema("chat");
-    //í•œêµ­ì–´ë¥¼ ë°›ê¸°ìœ„í•œ ì„¤ì •ë¬¸
     stmt = con->createStatement();
-    stmt->execute("set names euckr");
+    stmt->execute("set names euckr");//ÇÑ±¹¾î¸¦ ¹Ş±âÀ§ÇÑ ¼³Á¤¹®
+
     if (stmt) { delete stmt; stmt = nullptr; }
     stmt = con->createStatement();
     delete stmt;
-    
+
     if (!code) {
+        client_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);  //¿¬°áÇÒ ¼­¹ö Á¤º¸ ¼³Á¤ ºÎºĞ
 
-        client_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP); // 
-
-        // ì—°ê²°í•  ì„œë²„ ì •ë³´ ì„¤ì • ë¶€ë¶„
-        SOCKADDR_IN client_addr = {};
         client_addr.sin_family = AF_INET;
         client_addr.sin_port = htons(7777);
         InetPton(AF_INET, TEXT("127.0.0.1"), &client_addr.sin_addr);
-        string id, password;
-        while (1) {
-            cout << "1: ë¡œê·¸ì¸í•˜ê¸° 2: íšŒì›ê°€ì…í•˜ê¸°" << endl;
-            cin >> client_choose;
-            // ë¡œê·¸ì¸
-            if (client_choose == 1) {
-                cout << "ID:";
-                cin >> id;
-                cout << "PW:";
-                cin >> password;
-                bool check = login_possible(id, password);
-                if (!check) continue;
-                MenuList(client_addr, id, password);
-            }
-            if (client_choose == 2)
-            {
-                join_membership();
-                continue;
-            }
-        }
+
+        first_screen();
     }
     WSACleanup();
     return 0;
